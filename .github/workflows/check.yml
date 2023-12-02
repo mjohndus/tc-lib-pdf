@@ -23,14 +23,14 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                php-version: ["8.0", "8.1", "8.2"]
+                php-version: ["8.0", "8.1", "8.2", "8.3"]
                 experimental: [false]
                 os: [ubuntu-latest]
                 coverage-extension: [pcov]
         steps:
             - uses: actions/checkout@v4
-            - name: Install pdfinfo
-              run: sudo apt-get install -y poppler-utils
+            #- name: Install pdfinfo
+            #  run: sudo apt-get install -y poppler-utils
             - name: Use php ${{ matrix.php-version }}
               uses: shivammathur/setup-php@v2
               with:
