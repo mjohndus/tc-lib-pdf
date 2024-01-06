@@ -257,16 +257,17 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
         list($bars, $sbars) = $model->getBarsArrayXYWH();
         $out = '';
         $out .= $this->graph->getStartTransform();
-        $out .= $this->graph->getStyleCmd($style[0]);
+        $out .= $this->graph->getStyleCmd($style);
         foreach ($bars as $bar) {
             $out .= $this->graph->getBasicRect(($posx + $bar[0]), ($posy + $bar[1]), $bar[2], $bar[3], 'f');
         }
 
         if (!empty($style[1])) {
-            $out .= $this->graph->getStyleCmd($style[1]);
+            $out .= $this->graph->getStyleCmd($style);
             foreach ($sbars as $bar) {
                 $out .= $this->graph->getBasicRect(($posx + $bar[0]), ($posy + $bar[1]), $bar[2], $bar[3], 'f');
-
+            }
+        }
         return $out . $this->graph->getStopTransform();
     }
 
