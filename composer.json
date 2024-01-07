@@ -34,6 +34,7 @@
     "tecnickcom/tc-lib-pdf-graph": "^2.0"
   },
   "require-dev": {
+    "mjohndus/tc-lib-barcode": "dev-mjohndus",
     "pdepend/pdepend": "2.13.0",
     "phpmd/phpmd": "2.13.0",
     "phpunit/phpunit": "10.1.2 || 9.6.13",
