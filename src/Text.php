@@ -103,6 +103,65 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $dim = [];
         $this->prepareText($txt, $ordarr, $dim);
 
+        return $this->getOutTextLine(
+            $txt,
+            $ordarr,
+            $dim,
+            $posx,
+            $posy,
+            $width,
+            $strokewidth,
+            $wordspacing,
+            $leading,
+            $rise,
+            $fill,
+            $stroke,
+            $clip,
+            $forcedir,
+            $shadow,
+        );
+    }
+
+    /**
+     * Returns the PDF code to render a single line of text.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param TTextDims   $dim         Array of dimensions
+     * @param float       $posx        X position relative to the start of the current line.
+     * @param float       $posy        Y position relative to the start of the current line (font baseline).
+     * @param float       $width       Desired string width to force justification via word spacing (0 = automatic).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when width == 0).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     */
+    protected function getOutTextLine(
+        string $txt,
+        array $ordarr,
+        array $dim,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $clip = false,
+        string $forcedir = '',
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '' || $ordarr === [] || $dim === []) {
+            return '';
+        }
+
         $out = '';
 
         if (!empty($shadow)) {
