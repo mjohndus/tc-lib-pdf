@@ -64,21 +64,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     ];
 
     /**
-     * Estimate the number of rows required to print a text string on a retangular block.
-     *
-     * @param string $txt   Text string to be processed.
-     * @param float  $width Max line width.
-     */
-    public function getNumLines(string $txt, float $width = 0): int
-    {
-        if ($txt === '') {
-            return 0;
-        }
-
-        return 1; // @TODO
-    }
-
-    /**
      * Returns the PDF code to render a line of text.
      *
      * @param string      $txt         Text string to be processed.
@@ -92,7 +77,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
-     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
      * @param ?TextShadow $shadow      Text shadow parameters.
      */
     public function getTextLine(
@@ -132,7 +117,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $fill,
             $stroke,
             $clip,
-            $forcedir,
             $shadow,
         );
     }
@@ -153,7 +137,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
-     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR
      * @param ?TextShadow $shadow      Text shadow parameters.
      */
     protected function getOutTextLine(
@@ -170,7 +153,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
-        string $forcedir = '',
         ?array $shadow = null,
     ): string {
         if ($txt === '' || $ordarr === [] || $dim === []) {
@@ -205,7 +187,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 true,
                 false,
                 false,
-                $forcedir
             );
             $out .= $this->graph->getStopTransform();
         }
@@ -224,7 +205,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $fill,
             $stroke,
             $clip,
-            $forcedir
         );
     }
 
@@ -258,6 +238,49 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     }
 
     /**
+     * Split the text into lines to fit the specified width.
+     *
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim     Array of dimensions.
+     * @param float           $pwidth   Max line width in internal points.
+     *
+     * @return array<int, array<int, int>> Array of lines as UTF-8 codepoints (integer values).
+     */
+    protected function splitLines(
+        array $ordarr,
+        array $dim,
+        float $pwidth,
+    ): array {
+        if (empty($ordarr)) {
+            // no lines
+            return [];
+        }
+
+        if ($dim['totwidth'] <= $pwidth) {
+            // single line
+            return [$ordarr];
+        }
+
+        $lines = [];
+        $posstart = 0;
+        $posend = 0;
+
+        foreach ($dim['split'] as $data) {
+            if ($data['totwidth'] >= $pwidth) {
+                $posend = $data['pos'];
+                $lines[] = array_slice($ordarr, $posstart, $posend - $posstart);
+                $posstart = $posend + 1; // skip word separator
+            }
+        }
+
+        if ($posstart < count($ordarr)) {
+            $lines[] = array_slice($ordarr, $posstart);
+        }
+
+        return $lines;
+    }
+
+    /**
      * Returns the PDF code to render a line of text.
      *
      * @param string          $txt         Clean text string to be processed.
@@ -273,7 +296,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool            $fill        If true fills the text.
      * @param bool            $stroke      If true stroke the text.
      * @param bool            $clip        If true activate clipping mode.
-     * @param string          $forcedir    If 'R' forces RTL, if 'L' forces LTR
      */
     protected function outTextLine(
         string $txt,
@@ -289,7 +311,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
-        string $forcedir = '',
     ): string {
         if ($txt === '' || $ordarr === [] || $dim === []) {
             return '';
@@ -303,7 +324,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             'width' => $width,
             'height' => $this->toUnit($curfont['height']),
         ];
-        $out = $this->getJustifiedString($txt, $ordarr, $dim, $width, $forcedir);
+        $out = $this->getJustifiedString($txt, $ordarr, $dim, $width);
         $out = $this->getOutTextPosXY($out, $posx, $posy, 'Td');
 
         $trmode = $this->getTextRenderingMode($fill, $stroke, $clip);
@@ -352,14 +373,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
      * @param TTextDims       $dim      Array of dimensions
      * @param float           $width    Desired string width in points (0 = automatic).
-     * @param string          $forcedir If 'R' forces RTL, if 'L' forces LTR
      */
     protected function getJustifiedString(
         string $txt,
         array $ordarr,
         array $dim,
         float $width = 0,
-        string $forcedir = ''
     ): string {
         $pwidth = $this->toPoints($width);
         $spacewidth = (($pwidth - $dim['totwidth'] + $dim['totspacewidth']) / ($dim['spaces'] ?: 1));
