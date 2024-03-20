@@ -48,6 +48,11 @@ use Com\Tecnick\Unicode\Bidi;
  *          'mode': string,
  *          'color': string,
  *      }
+ *
+ * @phpstan-type TextLinePos array{
+ *          'i': int,
+ *          'w': int,
+ *      }
  */
 abstract class Text extends \Com\Tecnick\Pdf\Cell
 {
@@ -64,7 +69,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     ];
 
     /**
-     * Returns the PDF code to render a line of text.
+     * Returns the PDF code to render a single line of text.
      *
      * @param string      $txt         Text string to be processed.
      * @param float       $posx        X position relative to the start of the current line.
@@ -244,7 +249,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param TTextDims       $dim     Array of dimensions.
      * @param float           $pwidth   Max line width in internal points.
      *
-     * @return array<int, array<int, int>> Array of lines as UTF-8 codepoints (integer values).
+     * @return array<int, TextLinePos> Array of line start/width in the ordarr.
      */
     protected function splitLines(
         array $ordarr,
@@ -258,7 +263,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         if ($dim['totwidth'] <= $pwidth) {
             // single line
-            return [$ordarr];
+            return [['i' => 0, 'w' => $dim['chars']]];
         }
 
         $lines = [];
@@ -268,13 +273,13 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         foreach ($dim['split'] as $data) {
             if ($data['totwidth'] >= $pwidth) {
                 $posend = $data['pos'];
-                $lines[] = array_slice($ordarr, $posstart, $posend - $posstart);
+                $lines[] = ['i' => $posstart, 'w' => ($posend - $posstart)];
                 $posstart = $posend + 1; // skip word separator
             }
         }
 
-        if ($posstart < count($ordarr)) {
-            $lines[] = array_slice($ordarr, $posstart);
+        if ($posstart < $dim['chars']) {
+            $lines[] = ['i' => $posstart, 'w' => ($dim['chars'] - $posstart)];
         }
 
         return $lines;
