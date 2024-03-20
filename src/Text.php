@@ -64,6 +64,21 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     ];
 
     /**
+     * Estimate the number of rows required to print a text string on a retangular block.
+     *
+     * @param string $txt   Text string to be processed.
+     * @param float  $width Max line width.
+     */
+    public function getNumLines(string $txt, float $width = 0): int
+    {
+        if ($txt === '') {
+            return 0;
+        }
+
+        return 1; // @TODO
+    }
+
+    /**
      * Returns the PDF code to render a line of text.
      *
      * @param string      $txt         Text string to be processed.
@@ -101,7 +116,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         $ordarr = [];
         $dim = [];
-        $this->prepareText($txt, $ordarr, $dim);
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
 
         return $this->getOutTextLine(
             $txt,
@@ -216,14 +231,16 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Cleanup the input text, convert it to UTF-8 array and get the dimensions.
      *
-     * @param string          $txt    Clean text string to be processed.
-     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
-     * @param TTextDims       $dim    Array of dimensions
+     * @param string          $txt      Clean text string to be processed.
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim      Array of dimensions
+     * @param string          $forcedir If 'R' forces RTL, if 'L' forces LTR.
      */
     protected function prepareText(
         string &$txt,
         array &$ordarr,
-        array &$dim
+        array &$dim,
+        string $forcedir = '',
     ): void {
         if ($txt === '') {
             return;
@@ -231,6 +248,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         $txt = $this->cleanupText($txt);
         $ordarr = $this->uniconv->strToOrdArr($txt);
+
+        if ($this->isunicode && !$this->font->isCurrentByteFont()) {
+            $bidi = new Bidi($txt, null, $ordarr, $forcedir);
+            $ordarr = $this->replaceUnicodeChars($bidi->getOrdArray());
+        }
+
         $dim = $this->font->getOrdArrDims($ordarr);
     }
 
@@ -354,8 +377,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         if ($this->font->isCurrentByteFont()) {
             $txt = $this->uniconv->latinArrToStr($this->uniconv->uniArrToLatinArr($ordarr));
         } else {
-            $bidi = new Bidi($txt, null, $ordarr, $forcedir);
-            $unistr = $this->replaceUnicodeChars($bidi->getString());
+            $unistr = implode('', $this->uniconv->ordArrToChrArr($ordarr));
             $txt = $this->uniconv->toUTF16BE($unistr);
         }
 
@@ -586,12 +608,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Replace characters for languages like Thai.
      *
-     * @param string $str String to process.
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int> Array of UTF-8 codepoints (integer values).
      */
-    protected function replaceUnicodeChars(string $str): string
+    protected function replaceUnicodeChars(array $ordarr): array
     {
         // @TODO
-        return $str;
+        return $ordarr;
     }
 
     /**
