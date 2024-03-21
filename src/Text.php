@@ -50,8 +50,12 @@ use Com\Tecnick\Unicode\Bidi;
  *      }
  *
  * @phpstan-type TextLinePos array{
- *          'i': int,
- *          'w': int,
+ *          'pos': int,
+ *          'chars': int,
+ *          'spaces': int,
+ *          'totwidth': float,
+ *          'totspacewidth': float,
+ *          'words': int,
  *      }
  */
 abstract class Text extends \Com\Tecnick\Pdf\Cell
@@ -67,6 +71,93 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         'width' => 0,
         'height' => 0,
     ];
+
+    /**
+     * Returns the PDF code to render a text in a given column with automatic line breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $linespace   Line vetical spacing.
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     */
+    public function getTextCol(
+        string $txt,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $linespace = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $justify = false,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $clip = false,
+        string $forcedir = '',
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '') {
+            return '';
+        }
+
+        $ordarr = [];
+        $dim = [];
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width));
+        $lastline = (count($lines) - 1);
+        $jwidth = ($justify ? $width : 0);
+        $line_posy = $posy;
+        $curfont = $this->font->getCurrentFont();
+        $font_ascent = $this->toUnit($curfont['ascent']);
+        $out = '';
+
+        foreach ($lines as $i => $data) {
+            $line_ordarr = array_slice($ordarr, $data['pos'], $data['chars']);
+            $line_txt = implode('', $this->uniconv->ordArrToChrArr($line_ordarr));
+            $line_dim = [
+                'chars' => $data['chars'],
+                'spaces' => $data['spaces'],
+                'totwidth' => $data['totwidth'],
+                'totspacewidth' => $data['totspacewidth'],
+                'words' => $data['words'],
+                'split' => [],
+            ];
+
+            $out .= $this->getOutTextLine(
+                $line_txt,
+                $line_ordarr,
+                $line_dim,
+                $posx,
+                $line_posy,
+                (($i < $lastline) ? $jwidth : 0), // do not justify last line
+                $strokewidth,
+                $wordspacing,
+                $leading,
+                $rise,
+                $fill,
+                $stroke,
+                $clip,
+                $shadow,
+            );
+
+            $line_posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $font_ascent + $linespace);
+        }
+
+        return $out;
+    }
 
     /**
      * Returns the PDF code to render a single line of text.
@@ -263,23 +354,55 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         if ($dim['totwidth'] <= $pwidth) {
             // single line
-            return [['i' => 0, 'w' => $dim['chars']]];
+            return [[
+                'pos' => 0,
+                'chars' => $dim['chars'],
+                'spaces' => $dim['spaces'],
+                'totwidth' => $dim['totwidth'],
+                'totspacewidth' => $dim['totspacewidth'],
+                'words' => $dim['words'],
+            ]];
         }
 
         $lines = [];
         $posstart = 0;
         $posend = 0;
 
-        foreach ($dim['split'] as $data) {
-            if ($data['totwidth'] >= $pwidth) {
+        $prev_spaces = 0;
+        $prev_totwidth = 0;
+        $prev_totspacewidth = 0;
+        $prev_words = 0;
+
+        foreach ($dim['split'] as $word => $data) {
+            if (($data['totwidth'] - $prev_totwidth) >= $pwidth) {
                 $posend = $data['pos'];
-                $lines[] = ['i' => $posstart, 'w' => ($posend - $posstart)];
+                $lines[] = [
+                    'pos' => $posstart,
+                    'chars' => ($posend - $posstart),
+                    'spaces' => ($data['spaces'] - $prev_spaces),
+                    'totwidth' => ($data['totwidth'] - $prev_totwidth),
+                    'totspacewidth' => ($data['totspacewidth'] - $prev_totspacewidth),
+                    'words' => ($word - $prev_words),
+                ];
+
                 $posstart = $posend + 1; // skip word separator
+                $prev_spaces = $data['spaces'];
+                $prev_totwidth = $data['totwidth'];
+                $prev_totspacewidth = $data['totspacewidth'];
+                $prev_words = $word;
             }
         }
 
         if ($posstart < $dim['chars']) {
-            $lines[] = ['i' => $posstart, 'w' => ($dim['chars'] - $posstart)];
+            $last = $dim['split'][$dim['words'] - 1];
+            $lines[] = [
+                'pos' => $posstart,
+                'chars' => ($dim['chars'] - $posstart),
+                'spaces' => ($last['spaces'] - $prev_spaces),
+                'totwidth' => ($last['totwidth'] - $prev_totwidth),
+                'totspacewidth' => ($last['totspacewidth'] - $prev_totspacewidth),
+                'words' => ($dim['words'] - $prev_words),
+            ];
         }
 
         return $lines;
