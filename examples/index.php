@@ -1102,8 +1102,6 @@ $txtbox = $pdf->getTextCol(
 );
 $pdf->page->addContent($txtbox);
 
-
-
 // ----------
 
 // get PDF document as raw string
