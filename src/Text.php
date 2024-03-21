@@ -119,9 +119,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width));
         $lastline = (count($lines) - 1);
         $jwidth = ($justify ? $width : 0);
-        $line_posy = $posy;
         $curfont = $this->font->getCurrentFont();
         $font_ascent = $this->toUnit($curfont['ascent']);
+        $line_posy = $posy + $font_ascent;
         $out = '';
 
         foreach ($lines as $i => $data) {

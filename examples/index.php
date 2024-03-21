@@ -1086,7 +1086,7 @@ $txt3 = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
 $txtbox = $pdf->getTextCol(
     $txt3,
     20, // float $posx = 0,
-    50, // float $posy = 0,
+    30, // float $posy = 0,
     150, // float $width = 0,
     1, // float $linespace = 0,
     0, // float $strokewidth = 0,
