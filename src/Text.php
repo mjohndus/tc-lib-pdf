@@ -48,6 +48,16 @@ use Com\Tecnick\Unicode\Bidi;
  *          'mode': string,
  *          'color': string,
  *      }
+ *
+ * @phpstan-type TextLinePos array{
+ *          'pos': int,
+ *          'chars': int,
+ *          'spaces': int,
+ *          'septype': string,
+ *          'totwidth': float,
+ *          'totspacewidth': float,
+ *          'words': int,
+ *      }
  */
 abstract class Text extends \Com\Tecnick\Pdf\Cell
 {
@@ -62,9 +72,178 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         'width' => 0,
         'height' => 0,
     ];
+    /**
+     * Returns the PDF code to render a text in a given column with automatic line breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     *
+     * @return string PDF code to render the text.
+     */
+    public function getTextCol(
+        string $txt,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $linespace = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $justify = false,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $clip = false,
+        string $forcedir = '',
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '') {
+            return '';
+        }
+
+        $ordarr = [];
+        $dim = [];
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+
+        $curfont = $this->font->getCurrentFont();
+        $fontascent = $this->toUnit($curfont['ascent']);
+
+        if ($width == 0) {
+            $region = $this->page->getRegion();
+            $width = $region['RW'];
+        }
+
+        $justifylast = false;
+
+        return $this->outTextCol(
+            $txt,
+            $ordarr,
+            $dim,
+            $posx,
+            $posy,
+            $width,
+            $fontascent,
+            $linespace,
+            $strokewidth,
+            $wordspacing,
+            $leading,
+            $rise,
+            $justify,
+            $justifylast,
+            $fill,
+            $stroke,
+            $clip,
+            $shadow,
+        );
+    }
 
     /**
-     * Returns the PDF code to render a line of text.
+     * Returns the PDF code to render a contiguous text block with automatic line breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param TTextDims   $dim         Array of dimensions
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $fontascent  Font ascent in user units.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $justifylast If true justify the last line.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     *
+     * @return string PDF code to render the text.
+     */
+    protected function outTextCol(
+        string $txt,
+        array $ordarr,
+        array $dim,
+        float $posx,
+        float $posy,
+        float $width,
+        float $fontascent,
+        float $linespace = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $justify = false,
+        bool $justifylast = false,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $clip = false,
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '' || $ordarr === [] || $dim === []) {
+            return '';
+        }
+
+        $jwidth = ($justify ? $width : 0);
+
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width));
+        $num_lines = count($lines);
+        $lastline = ($num_lines - 1);
+
+        $posy += $fontascent;
+
+        $out = '';
+        foreach ($lines as $i => $data) {
+            $line_ordarr = array_slice($ordarr, $data['pos'], $data['chars']);
+            $line_txt = implode('', $this->uniconv->ordArrToChrArr($line_ordarr));
+            $line_dim = [
+                'chars' => $data['chars'],
+                'spaces' => $data['spaces'],
+                'totwidth' => $data['totwidth'],
+                'totspacewidth' => $data['totspacewidth'],
+                'words' => $data['words'],
+                'split' => [],
+            ];
+
+            $out .= $this->getOutTextLine(
+                $line_txt,
+                $line_ordarr,
+                $line_dim,
+                $posx,
+                $posy,
+                ((($data['septype'] != 'B') && (($i < $lastline) || $justifylast)) ? $jwidth : 0),
+                $strokewidth,
+                $wordspacing,
+                $leading,
+                $rise,
+                $fill,
+                $stroke,
+                $clip,
+                $shadow,
+            );
+
+            $posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Returns the PDF code to render a single line of text.
      *
      * @param string      $txt         Text string to be processed.
      * @param float       $posx        X position relative to the start of the current line.
@@ -77,7 +256,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
-     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
      * @param ?TextShadow $shadow      Text shadow parameters.
      */
     public function getTextLine(
@@ -101,7 +280,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         $ordarr = [];
         $dim = [];
-        $this->prepareText($txt, $ordarr, $dim);
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
 
         return $this->getOutTextLine(
             $txt,
@@ -117,7 +296,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $fill,
             $stroke,
             $clip,
-            $forcedir,
             $shadow,
         );
     }
@@ -138,7 +316,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
-     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR
      * @param ?TextShadow $shadow      Text shadow parameters.
      */
     protected function getOutTextLine(
@@ -155,7 +332,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
-        string $forcedir = '',
         ?array $shadow = null,
     ): string {
         if ($txt === '' || $ordarr === [] || $dim === []) {
@@ -190,7 +366,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 true,
                 false,
                 false,
-                $forcedir
             );
             $out .= $this->graph->getStopTransform();
         }
@@ -209,21 +384,22 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $fill,
             $stroke,
             $clip,
-            $forcedir
         );
     }
 
     /**
      * Cleanup the input text, convert it to UTF-8 array and get the dimensions.
      *
-     * @param string          $txt    Clean text string to be processed.
-     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
-     * @param TTextDims       $dim    Array of dimensions
+     * @param string          $txt      Clean text string to be processed.
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim      Array of dimensions
+     * @param string          $forcedir If 'R' forces RTL, if 'L' forces LTR.
      */
     protected function prepareText(
         string &$txt,
         array &$ordarr,
-        array &$dim
+        array &$dim,
+        string $forcedir = '',
     ): void {
         if ($txt === '') {
             return;
@@ -231,7 +407,91 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         $txt = $this->cleanupText($txt);
         $ordarr = $this->uniconv->strToOrdArr($txt);
+
+        if ($this->isunicode && !$this->font->isCurrentByteFont()) {
+            $bidi = new Bidi($txt, null, $ordarr, $forcedir);
+            $ordarr = $this->replaceUnicodeChars($bidi->getOrdArray());
+        }
+
         $dim = $this->font->getOrdArrDims($ordarr);
+    }
+
+    /**
+     * Split the text into lines to fit the specified width.
+     *
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim     Array of dimensions.
+     * @param float           $pwidth   Max line width in internal points.
+     *
+     * @return array<int, TextLinePos> Array of line start/width in the ordarr.
+     */
+    protected function splitLines(
+        array $ordarr,
+        array $dim,
+        float $pwidth,
+    ): array {
+        if (empty($ordarr)) {
+            // no lines
+            return [];
+        }
+
+        if ($dim['totwidth'] <= $pwidth) {
+            // single line
+            return [[
+                'pos' => 0,
+                'chars' => $dim['chars'],
+                'spaces' => $dim['spaces'],
+                'septype' => 'BN',
+                'totwidth' => $dim['totwidth'],
+                'totspacewidth' => $dim['totspacewidth'],
+                'words' => $dim['words'],
+            ]];
+        }
+
+        $lines = [];
+        $posstart = 0;
+        $posend = 0;
+
+        $prev_spaces = 0;
+        $prev_totwidth = 0;
+        $prev_totspacewidth = 0;
+        $prev_words = 0;
+
+        foreach ($dim['split'] as $word => $data) {
+            if (($data['totwidth'] - $prev_totwidth) >= $pwidth) {
+                $posend = $data['pos'];
+                $lines[] = [
+                    'pos' => $posstart,
+                    'chars' => ($posend - $posstart),
+                    'spaces' => ($data['spaces'] - $prev_spaces),
+                    'septype' => $data['septype'],
+                    'totwidth' => ($data['totwidth'] - $prev_totwidth),
+                    'totspacewidth' => ($data['totspacewidth'] - $prev_totspacewidth),
+                    'words' => ($word - $prev_words),
+                ];
+
+                $posstart = $posend + 1; // skip word separator
+                $prev_spaces = $data['spaces'];
+                $prev_totwidth = $data['totwidth'];
+                $prev_totspacewidth = $data['totspacewidth'];
+                $prev_words = $word;
+            }
+        }
+
+        if ($posstart < $dim['chars']) {
+            $last = $dim['split'][$dim['words'] - 1];
+            $lines[] = [
+                'pos' => $posstart,
+                'chars' => ($dim['chars'] - $posstart),
+                'spaces' => ($last['spaces'] - $prev_spaces),
+                'septype' => $last['septype'],
+                'totwidth' => ($last['totwidth'] - $prev_totwidth),
+                'totspacewidth' => ($last['totspacewidth'] - $prev_totspacewidth),
+                'words' => ($dim['words'] - $prev_words),
+            ];
+        }
+
+        return $lines;
     }
 
     /**
@@ -250,7 +510,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param bool            $fill        If true fills the text.
      * @param bool            $stroke      If true stroke the text.
      * @param bool            $clip        If true activate clipping mode.
-     * @param string          $forcedir    If 'R' forces RTL, if 'L' forces LTR
      */
     protected function outTextLine(
         string $txt,
@@ -266,7 +525,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
-        string $forcedir = '',
     ): string {
         if ($txt === '' || $ordarr === [] || $dim === []) {
             return '';
@@ -280,7 +538,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             'width' => $width,
             'height' => $this->toUnit($curfont['height']),
         ];
-        $out = $this->getJustifiedString($txt, $ordarr, $dim, $width, $forcedir);
+        $out = $this->getJustifiedString($txt, $ordarr, $dim, $width);
         $out = $this->getOutTextPosXY($out, $posx, $posy, 'Td');
 
         $trmode = $this->getTextRenderingMode($fill, $stroke, $clip);
@@ -329,14 +587,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
      * @param TTextDims       $dim      Array of dimensions
      * @param float           $width    Desired string width in points (0 = automatic).
-     * @param string          $forcedir If 'R' forces RTL, if 'L' forces LTR
      */
     protected function getJustifiedString(
         string $txt,
         array $ordarr,
         array $dim,
         float $width = 0,
-        string $forcedir = ''
     ): string {
         $pwidth = $this->toPoints($width);
         $spacewidth = (($pwidth - $dim['totwidth'] + $dim['totspacewidth']) / ($dim['spaces'] ?: 1));
@@ -354,8 +610,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         if ($this->font->isCurrentByteFont()) {
             $txt = $this->uniconv->latinArrToStr($this->uniconv->uniArrToLatinArr($ordarr));
         } else {
-            $bidi = new Bidi($txt, null, $ordarr, $forcedir);
-            $unistr = $this->replaceUnicodeChars($bidi->getString());
+            $unistr = implode('', $this->uniconv->ordArrToChrArr($ordarr));
             $txt = $this->uniconv->toUTF16BE($unistr);
         }
 
@@ -586,12 +841,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Replace characters for languages like Thai.
      *
-     * @param string $str String to process.
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int> Array of UTF-8 codepoints (integer values).
      */
-    protected function replaceUnicodeChars(string $str): string
+    protected function replaceUnicodeChars(array $ordarr): array
     {
         // @TODO
-        return $str;
+        return $ordarr;
     }
 
     /**
