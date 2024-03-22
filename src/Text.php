@@ -72,6 +72,120 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         'width' => 0,
         'height' => 0,
     ];
+
+    /**
+     * Add a text column with automatic line, page and region breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $justifylast If true justify the last line.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     */
+    public function addTextCol(
+        string $txt,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $offset = 0,
+        float $linespace = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $justify = false,
+        bool $justifylast = false,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $clip = false,
+        string $forcedir = '',
+        ?array $shadow = null,
+    ): void {
+        if ($txt === '') {
+            return;
+        }
+
+        $ordarr = [];
+        $dim = [];
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+
+        $curfont = $this->font->getCurrentFont();
+        $fontascent = $this->toUnit($curfont['ascent']);
+        $fontheight = $this->toUnit($curfont['height']);
+
+        $region = $this->page->getRegion();
+        $line_posy = ($posy + $region['RY']);
+
+        // loop through the regions to fit all available text
+        while (true) {
+            if ($this->page->isYOutRegion($line_posy, $fontheight)) {
+                $this->page->getNextRegion();
+                $this->page->addContent($this->font->getCurrentFont()['out']);
+                $region = $this->page->getRegion();
+                $line_posy = $region['RY'];
+            }
+
+            $line_posx = ($posx + $region['RX']);
+
+            if (($width == 0) || ($width > $region['RW'])) {
+                $width = $region['RW'];
+            }
+
+            $region_max_lines = (int)((($region['RH'] - $line_posy) + $linespace) / ($fontheight + $linespace));
+            $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width), $this->toPoints($offset));
+            $num_lines = count($lines);
+
+            $rlines = $lines;
+            if ($num_lines > $region_max_lines) {
+                $rlines = array_slice($lines, 0, $region_max_lines);
+            }
+
+            $out = $this->outTextLines(
+                $ordarr,
+                $rlines,
+                $line_posx,
+                $line_posy,
+                $width,
+                $offset,
+                $fontascent,
+                $linespace,
+                $strokewidth,
+                $wordspacing,
+                $leading,
+                $rise,
+                $justify,
+                $justifylast,
+                $fill,
+                $stroke,
+                $clip,
+                $shadow,
+            );
+
+            $this->page->addContent($out);
+
+            if ($num_lines <= $region_max_lines) {
+                return;
+            }
+
+            $ordarr = array_slice($ordarr, $lines[$region_max_lines]['pos']);
+            $dim = $this->font->getOrdArrDims($ordarr);
+            $offset = 0;
+            $line_posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
+        }
+    }
+
     /**
      * Returns the PDF code to render a text in a given column with automatic line breaks.
      *
@@ -79,12 +193,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param float       $posx        Abscissa of upper-left corner.
      * @param float       $posy        Ordinate of upper-left corner.
      * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
      * @param float       $linespace   Additional space to add between lines.
      * @param float       $strokewidth Stroke width.
      * @param float       $wordspacing Word spacing (use it only when justify == false).
      * @param float       $leading     Leading.
      * @param float       $rise        Text rise.
      * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $justifylast If true justify the last line.
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
@@ -98,12 +214,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         float $posx = 0,
         float $posy = 0,
         float $width = 0,
+        float $offset = 0,
         float $linespace = 0,
         float $strokewidth = 0,
         float $wordspacing = 0,
         float $leading = 0,
         float $rise = 0,
         bool $justify = false,
+        bool $justifylast = false,
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
@@ -126,15 +244,15 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $width = $region['RW'];
         }
 
-        $justifylast = false;
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width), $this->toPoints($offset));
 
-        return $this->outTextCol(
-            $txt,
+        return $this->outTextLines(
             $ordarr,
-            $dim,
+            $lines,
             $posx,
             $posy,
             $width,
+            $offset,
             $fontascent,
             $linespace,
             $strokewidth,
@@ -153,12 +271,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Returns the PDF code to render a contiguous text block with automatic line breaks.
      *
-     * @param string      $txt         Text string to be processed.
      * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
-     * @param TTextDims   $dim         Array of dimensions
+     * @param array<int, TextLinePos> $lines    Array of lines metrics.
      * @param float       $posx        Abscissa of upper-left corner.
      * @param float       $posy        Ordinate of upper-left corner.
      * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
      * @param float       $fontascent  Font ascent in user units.
      * @param float       $linespace   Additional space to add between lines.
      * @param float       $strokewidth Stroke width.
@@ -174,13 +292,13 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      *
      * @return string PDF code to render the text.
      */
-    protected function outTextCol(
-        string $txt,
+    protected function outTextLines(
         array $ordarr,
-        array $dim,
+        array $lines,
         float $posx,
         float $posy,
         float $width,
+        float $offset,
         float $fontascent,
         float $linespace = 0,
         float $strokewidth = 0,
@@ -194,17 +312,15 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $clip = false,
         ?array $shadow = null,
     ): string {
-        if ($txt === '' || $ordarr === [] || $dim === []) {
+        if ($ordarr === [] || $lines === []) {
             return '';
         }
 
-        $jwidth = ($justify ? $width : 0);
-
-        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width));
         $num_lines = count($lines);
         $lastline = ($num_lines - 1);
 
-        $posy += $fontascent;
+        $line_posx = $posx + $offset;
+        $line_posy = $posy + $fontascent;
 
         $out = '';
         foreach ($lines as $i => $data) {
@@ -219,13 +335,18 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 'split' => [],
             ];
 
+            $jwidth = 0;
+            if ($justify && ($data['septype'] != 'B') && (($i < $lastline) || $justifylast)) {
+                $jwidth = ($width - $offset);
+            }
+
             $out .= $this->getOutTextLine(
                 $line_txt,
                 $line_ordarr,
                 $line_dim,
-                $posx,
-                $posy,
-                ((($data['septype'] != 'B') && (($i < $lastline) || $justifylast)) ? $jwidth : 0),
+                $line_posx,
+                $line_posy,
+                $jwidth,
                 $strokewidth,
                 $wordspacing,
                 $leading,
@@ -236,7 +357,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $shadow,
             );
 
-            $posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
+            $offset = 0;
+            $line_posx = $posx;
+            $line_posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
         }
 
         return $out;
@@ -419,23 +542,27 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Split the text into lines to fit the specified width.
      *
-     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
-     * @param TTextDims       $dim     Array of dimensions.
-     * @param float           $pwidth   Max line width in internal points.
+     * @param array<int, int> $ordarr    Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim       Array of dimensions.
+     * @param float           $pwidth    Max line width in internal points.
+     * @param float           $poffset  Horizontal offset to apply to the line start in internal points.
      *
-     * @return array<int, TextLinePos> Array of line start/width in the ordarr.
+     * @return array<int, TextLinePos> Array of lines metrics.
      */
     protected function splitLines(
         array $ordarr,
         array $dim,
         float $pwidth,
+        float $poffset = 0,
     ): array {
         if (empty($ordarr)) {
             // no lines
             return [];
         }
 
-        if ($dim['totwidth'] <= $pwidth) {
+        $line_width = ($pwidth - $poffset);
+
+        if ($dim['totwidth'] <= $line_width) {
             // single line
             return [[
                 'pos' => 0,
@@ -451,14 +578,20 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $lines = [];
         $posstart = 0;
         $posend = 0;
-
         $prev_spaces = 0;
         $prev_totwidth = 0;
         $prev_totspacewidth = 0;
         $prev_words = 0;
+        $num_lines = count($dim['split']);
 
-        foreach ($dim['split'] as $word => $data) {
-            if (($data['totwidth'] - $prev_totwidth) >= $pwidth) {
+        for ($word = 0; $word < $num_lines; $word++) {
+            $data = $dim['split'][$word];
+            $curwidth = ($data['totwidth'] - $prev_totwidth);
+            if (($data['septype'] == 'B') || ($curwidth >= $line_width)) {
+                if (($word > 0) && ($curwidth >= $line_width)) {
+                    $data = $dim['split'][($word - 1)];
+                    --$word;
+                }
                 $posend = $data['pos'];
                 $lines[] = [
                     'pos' => $posstart,
@@ -475,6 +608,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $prev_totwidth = $data['totwidth'];
                 $prev_totspacewidth = $data['totspacewidth'];
                 $prev_words = $word;
+                $line_width = $pwidth;
             }
         }
 

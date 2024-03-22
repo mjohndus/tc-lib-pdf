@@ -1081,19 +1081,22 @@ $bfont3 = $pdf->font->insert($pdf->pon, 'times', 'I', 14);
 
 $pdf->page->addContent($bfont3['out']);
 
-$txt3 = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.';
+$txt3 = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'."\n".'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.';
 
+// single block of text 
 $txtbox = $pdf->getTextCol(
     $txt3,
     20, // float $posx = 0,
     30, // float $posy = 0,
     150, // float $width = 0,
+    15, // float $offset = 0,
     1, // float $linespace = 0,
     0, // float $strokewidth = 0,
     0, // float $wordspacing = 0,
     0, // float $leading = 0,
     0, // float $rise = 0,
     true, // bool $justify = false,
+    false, // bool $justifylast = false,
     true, // bool $fill = true,
     false, // bool $stroke = false,
     false, // bool $clip = false,
@@ -1101,6 +1104,27 @@ $txtbox = $pdf->getTextCol(
     null, // ?array $shadow = null,
 );
 $pdf->page->addContent($txtbox);
+
+// block of text between two page regions
+$pdf->addTextCol(
+    $txt3,
+    20, // float $posx = 0,
+    275, // float $posy = 0,
+    150, // float $width = 0,
+    15, // float $offset = 0,
+    1, // float $linespace = 0,
+    0, // float $strokewidth = 0,
+    0, // float $wordspacing = 0,
+    0, // float $leading = 0,
+    0, // float $rise = 0,
+    true, // bool $justify = false,
+    false, // bool $justifylast = false,
+    true, // bool $fill = true,
+    false, // bool $stroke = false,
+    false, // bool $clip = false,
+    '', // string $forcedir = '',
+    null, // ?array $shadow = null,
+);
 
 // ----------
 
