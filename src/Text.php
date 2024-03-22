@@ -587,7 +587,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         for ($word = 0; $word < $num_lines; $word++) {
             $data = $dim['split'][$word];
             if (($data['septype'] == 'B') || (($data['totwidth'] - $prev_totwidth) >= $line_width)) {
-                if (($data['septype'] != 'B') && ($word > 0)) {
+                if (($word > 0) && (($data['totwidth'] - $prev_totwidth) >= $line_width)) {
                     $data = $dim['split'][($word - 1)];
                     --$word;
                 }

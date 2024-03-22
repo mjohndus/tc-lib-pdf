@@ -1083,6 +1083,7 @@ $pdf->page->addContent($bfont3['out']);
 
 $txt3 = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'."\n".'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.';
 
+// single block of text 
 $txtbox = $pdf->getTextCol(
     $txt3,
     20, // float $posx = 0,
@@ -1104,6 +1105,7 @@ $txtbox = $pdf->getTextCol(
 );
 $pdf->page->addContent($txtbox);
 
+// block of text between two page regions
 $pdf->addTextCol(
     $txt3,
     20, // float $posx = 0,
