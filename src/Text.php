@@ -131,10 +131,11 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $width = $region['RW'];
         }
 
-        return $this->outTextCol(
-            $txt,
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width), $this->toPoints($offset));
+
+        return $this->outTextLines(
             $ordarr,
-            $dim,
+            $lines,
             $posx,
             $posy,
             $width,
@@ -157,9 +158,8 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Returns the PDF code to render a contiguous text block with automatic line breaks.
      *
-     * @param string      $txt         Text string to be processed.
      * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
-     * @param TTextDims   $dim         Array of dimensions
+     * @param array<int, TextLinePos> $lines    Array of lines metrics.
      * @param float       $posx        Abscissa of upper-left corner.
      * @param float       $posy        Ordinate of upper-left corner.
      * @param float       $width       Width.
@@ -179,10 +179,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      *
      * @return string PDF code to render the text.
      */
-    protected function outTextCol(
-        string $txt,
+    protected function outTextLines(
         array $ordarr,
-        array $dim,
+        array $lines,
         float $posx,
         float $posy,
         float $width,
@@ -200,11 +199,10 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         bool $clip = false,
         ?array $shadow = null,
     ): string {
-        if ($txt === '' || $ordarr === [] || $dim === []) {
+        if ($ordarr === [] || $lines === []) {
             return '';
         }
 
-        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width), $this->toPoints($offset));
         $num_lines = count($lines);
         $lastline = ($num_lines - 1);
 
@@ -436,7 +434,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param float           $pwidth    Max line width in internal points.
      * @param float           $poffset  Horizontal offset to apply to the line start in internal points.
      *
-     * @return array<int, TextLinePos> Array of line start/width in the ordarr.
+     * @return array<int, TextLinePos> Array of lines metrics.
      */
     protected function splitLines(
         array $ordarr,
