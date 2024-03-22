@@ -1095,6 +1095,7 @@ $txtbox = $pdf->getTextCol(
     0, // float $leading = 0,
     0, // float $rise = 0,
     true, // bool $justify = false,
+    false, // bool $justifylast = false,
     true, // bool $fill = true,
     false, // bool $stroke = false,
     false, // bool $clip = false,

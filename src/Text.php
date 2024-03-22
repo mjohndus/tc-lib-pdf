@@ -87,6 +87,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param float       $leading     Leading.
      * @param float       $rise        Text rise.
      * @param bool        $justify     If true justify te text via word spacing.
+     * @param bool        $justifylast If true justify the last line.
      * @param bool        $fill        If true fills the text.
      * @param bool        $stroke      If true stroke the text.
      * @param bool        $clip        If true activate clipping mode.
@@ -107,6 +108,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         float $leading = 0,
         float $rise = 0,
         bool $justify = false,
+        bool $justifylast = false,
         bool $fill = true,
         bool $stroke = false,
         bool $clip = false,
@@ -128,8 +130,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $region = $this->page->getRegion();
             $width = $region['RW'];
         }
-
-        $justifylast = false;
 
         return $this->outTextCol(
             $txt,
