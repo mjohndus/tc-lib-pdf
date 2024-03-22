@@ -72,6 +72,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         'width' => 0,
         'height' => 0,
     ];
+
     /**
      * Returns the PDF code to render a text in a given column with automatic line breaks.
      *
@@ -79,6 +80,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param float       $posx        Abscissa of upper-left corner.
      * @param float       $posy        Ordinate of upper-left corner.
      * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
      * @param float       $linespace   Additional space to add between lines.
      * @param float       $strokewidth Stroke width.
      * @param float       $wordspacing Word spacing (use it only when justify == false).
@@ -98,6 +100,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         float $posx = 0,
         float $posy = 0,
         float $width = 0,
+        float $offset = 0,
         float $linespace = 0,
         float $strokewidth = 0,
         float $wordspacing = 0,
@@ -135,6 +138,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $posx,
             $posy,
             $width,
+            $offset,
             $fontascent,
             $linespace,
             $strokewidth,
@@ -159,6 +163,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * @param float       $posx        Abscissa of upper-left corner.
      * @param float       $posy        Ordinate of upper-left corner.
      * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
      * @param float       $fontascent  Font ascent in user units.
      * @param float       $linespace   Additional space to add between lines.
      * @param float       $strokewidth Stroke width.
@@ -181,6 +186,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         float $posx,
         float $posy,
         float $width,
+        float $offset,
         float $fontascent,
         float $linespace = 0,
         float $strokewidth = 0,
@@ -198,13 +204,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             return '';
         }
 
-        $jwidth = ($justify ? $width : 0);
-
-        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width));
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($width), $this->toPoints($offset));
         $num_lines = count($lines);
         $lastline = ($num_lines - 1);
 
-        $posy += $fontascent;
+        $line_posx = $posx + $offset;
+        $line_posy = $posy + $fontascent;
 
         $out = '';
         foreach ($lines as $i => $data) {
@@ -219,13 +224,18 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 'split' => [],
             ];
 
+            $jwidth = 0;
+            if ($justify && ($data['septype'] != 'B') && (($i < $lastline) || $justifylast)) {
+                $jwidth = ($width - $offset);
+            }
+
             $out .= $this->getOutTextLine(
                 $line_txt,
                 $line_ordarr,
                 $line_dim,
-                $posx,
-                $posy,
-                ((($data['septype'] != 'B') && (($i < $lastline) || $justifylast)) ? $jwidth : 0),
+                $line_posx,
+                $line_posy,
+                $jwidth,
                 $strokewidth,
                 $wordspacing,
                 $leading,
@@ -236,7 +246,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $shadow,
             );
 
-            $posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
+            $offset = 0;
+            $line_posx = $posx;
+            $line_posy = ($this->lasttxtbbox['y'] + $this->lasttxtbbox['height'] + $fontascent + $linespace);
         }
 
         return $out;
@@ -419,9 +431,10 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Split the text into lines to fit the specified width.
      *
-     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
-     * @param TTextDims       $dim     Array of dimensions.
-     * @param float           $pwidth   Max line width in internal points.
+     * @param array<int, int> $ordarr    Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim       Array of dimensions.
+     * @param float           $pwidth    Max line width in internal points.
+     * @param float           $poffset  Horizontal offset to apply to the line start in internal points.
      *
      * @return array<int, TextLinePos> Array of line start/width in the ordarr.
      */
@@ -429,13 +442,16 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         array $ordarr,
         array $dim,
         float $pwidth,
+        float $poffset = 0,
     ): array {
         if (empty($ordarr)) {
             // no lines
             return [];
         }
 
-        if ($dim['totwidth'] <= $pwidth) {
+        $line_width = ($pwidth - $poffset);
+
+        if ($dim['totwidth'] <= $line_width) {
             // single line
             return [[
                 'pos' => 0,
@@ -458,7 +474,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $prev_words = 0;
 
         foreach ($dim['split'] as $word => $data) {
-            if (($data['totwidth'] - $prev_totwidth) >= $pwidth) {
+            if (($data['septype'] == 'B') || (($data['totwidth'] - $prev_totwidth) >= $line_width)) {
                 $posend = $data['pos'];
                 $lines[] = [
                     'pos' => $posstart,
@@ -475,6 +491,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $prev_totwidth = $data['totwidth'];
                 $prev_totspacewidth = $data['totspacewidth'];
                 $prev_words = $word;
+                $line_width = $pwidth;
             }
         }
 
