@@ -1104,7 +1104,6 @@ $txtbox = $pdf->getTextCol(
 );
 $pdf->page->addContent($txtbox);
 
-
 $pdf->addTextCol(
     $txt3,
     20, // float $posx = 0,
