@@ -1104,6 +1104,27 @@ $txtbox = $pdf->getTextCol(
 );
 $pdf->page->addContent($txtbox);
 
+
+$pdf->addTextCol(
+    $txt3,
+    20, // float $posx = 0,
+    275, // float $posy = 0,
+    150, // float $width = 0,
+    15, // float $offset = 0,
+    1, // float $linespace = 0,
+    0, // float $strokewidth = 0,
+    0, // float $wordspacing = 0,
+    0, // float $leading = 0,
+    0, // float $rise = 0,
+    true, // bool $justify = false,
+    false, // bool $justifylast = false,
+    true, // bool $fill = true,
+    false, // bool $stroke = false,
+    false, // bool $clip = false,
+    '', // string $forcedir = '',
+    null, // ?array $shadow = null,
+);
+
 // ----------
 
 // get PDF document as raw string
