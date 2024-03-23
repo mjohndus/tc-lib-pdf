@@ -132,7 +132,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         while (true) {
             if ($this->page->isYOutRegion($line_posy, $fontheight)) {
                 $this->page->getNextRegion();
-                $this->page->addContent($this->font->getCurrentFont()['out']);
+                $this->setPageContext();
                 $region = $this->page->getRegion();
                 $line_posy = $region['RY'];
             }
