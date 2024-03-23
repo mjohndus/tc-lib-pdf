@@ -128,8 +128,10 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $region = $this->page->getRegion();
         $line_posy = ($posy + $region['RY']);
 
+        $region_max_lines  = 1;
+
         // loop through the regions to fit all available text
-        while (true) {
+        while ($region_max_lines > 0) {
             if ($this->page->isYOutRegion($line_posy, $fontheight)) {
                 $this->page->getNextRegion();
                 $this->setPageContext();
