@@ -420,4 +420,15 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
     ): float {
         return ($txtx + $this->cellTextHAlign($pwidth, $txtpwidth, $align, $cell));
     }
+
+    /**
+     * Sets the page context by adding the previous page font and graphic settings.
+     *
+     * @return void
+     */
+    protected function setPageContext(): void
+    {
+        $this->page->addContent($this->font->getOutCurrentFont());
+        $this->page->addContent($this->graph->getStyle());
+    }
 }
