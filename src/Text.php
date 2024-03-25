@@ -128,8 +128,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $this->prepareText($txt, $ordarr, $dim, $forcedir);
         $txt_pwidth = $dim['totwidth'];
 
-        $cell_pheight = $this->toPoints($height);
         $cell = $this->adjustMinCellPadding($styles, $cell);
+
+        $cell_pheight = $this->toPoints($height);
         if ($height <= 0) {
             $cell_pheight = $this->cellMinHeight($valign, $cell);
         }
@@ -152,9 +153,6 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $halign,
             $cell
         );
-
-        $curfont = $this->font->getCurrentFont();
-        $fontascent = $this->toUnit($curfont['ascent']);
 
         $txt_pnty = $this->textVPosFromCell(
             $cell_pnty,

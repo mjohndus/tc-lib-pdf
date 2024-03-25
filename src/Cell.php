@@ -346,7 +346,7 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
     }
 
     /**
-     * Returns the top Y coordinate of the cell wrapping the text.
+     * Returns the baseline Y coordinate of the cell wrapping the text.
      *
      * @param float     $txty    Text baseline top Y coordinate in internal points.
      * @param float     $pheight Cell height in internal points.
