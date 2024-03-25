@@ -678,9 +678,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     /**
      * Split the text into lines to fit the specified width.
      *
-     * @param array<int, int> $ordarr    Array of UTF-8 codepoints (integer values).
-     * @param TTextDims       $dim       Array of dimensions.
-     * @param float           $pwidth    Max line width in internal points.
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim      Array of dimensions.
+     * @param float           $pwidth   Max line width in internal points.
      * @param float           $poffset  Horizontal offset to apply to the line start in internal points.
      *
      * @return array<int, TextLinePos> Array of lines metrics.
@@ -745,7 +745,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 if ($data['septype'] == 'WS') {
                     ++$prev_spaces;
                 }
-                $prev_totwidth = $data['totwidth'];
+                $prev_totwidth = $data['totwidth'] + $this->font->getCharWidth($data['ord']);
                 $prev_totspacewidth = $data['totspacewidth'];
                 $prev_words = $word;
                 $line_width = $pwidth;
