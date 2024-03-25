@@ -1084,8 +1084,7 @@ $pdf->page->addAnnotRef($aoid);
 
 // add a text column with automatic line breaking
 
-$bfont3 = $pdf->font->insert($pdf->pon, 'times', '', 14);
-
+$bfont3 = $pdf->font->insert($pdf->pon, 'courier', '', 14);
 $pdf->page->addContent($bfont3['out']);
 
 $txt3 = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'."\n".'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.';
@@ -1111,6 +1110,10 @@ $txtbox = $pdf->getTextCol(
     null, // ?array $shadow = null,
 );
 $pdf->page->addContent($txtbox);
+
+
+$bfont4 = $pdf->font->insert($pdf->pon, 'dejavusans', '', 14);
+$pdf->page->addContent($bfont4['out']);
 
 // block of text between two page regions
 $pdf->addTextCol(
@@ -1146,6 +1149,9 @@ $style_cell = [
         'fillColor' => 'yellow',
     ],
 ];
+
+$bfont4 = $pdf->font->insert($pdf->pon, 'freeserif', 'I', 14);
+$pdf->page->addContent($bfont4['out']);
 
 $pdf->setDefaultCellPadding(1,1,1,1);
 $txtcell = $pdf->getTextCell(

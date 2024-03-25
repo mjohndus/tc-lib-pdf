@@ -865,34 +865,35 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         float $width = 0,
     ): string {
         $pwidth = $this->toPoints($width);
-        $spacewidth = (($pwidth - $dim['totwidth'] + $dim['totspacewidth']) / ($dim['spaces'] ?: 1));
-        if (! $this->isunicode) {
+
+        if ((!$this->isunicode) || $this->font->isCurrentByteFont()) {
+            if ($this->isunicode) {
+                $txt = $this->uniconv->latinArrToStr($this->uniconv->uniArrToLatinArr($ordarr));
+            }
             $txt = $this->encrypt->escapeString($txt);
             $txt = $this->getOutTextShowing($txt, 'Tj');
             if ($pwidth > 0) {
-                return $this->getOutTextStateOperatorTw($txt, $this->toPoints($spacewidth));
+                $spacewidth = (($pwidth - $dim['totwidth']) / ($dim['spaces'] ?: 1));
+                return $this->getOutTextStateOperatorTw($txt, $spacewidth);
             }
-
             $this->lasttxtbbox['width'] = $this->toUnit($dim['totwidth']);
             return $txt;
         }
 
-        if ($this->font->isCurrentByteFont()) {
-            $txt = $this->uniconv->latinArrToStr($this->uniconv->uniArrToLatinArr($ordarr));
-        } else {
-            $unistr = implode('', $this->uniconv->ordArrToChrArr($ordarr));
-            $txt = $this->uniconv->toUTF16BE($unistr);
-        }
-
+        $unistr = implode('', $this->uniconv->ordArrToChrArr($ordarr));
+        $txt = $this->uniconv->toUTF16BE($unistr);
         $txt = $this->encrypt->escapeString($txt);
+
         if ($pwidth <= 0) {
             $this->lasttxtbbox['width'] = $this->toUnit($dim['totwidth']);
             return $this->getOutTextShowing($txt, 'Tj');
         }
 
         $fontsize = $this->font->getCurrentFont()['size'] ?: 1;
+        $spacewidth = (($pwidth - $dim['totwidth'] + $dim['totspacewidth']) / ($dim['spaces'] ?: 1));
         $spacewidth = -1000 * $spacewidth / $fontsize;
         $txt = str_replace(chr(0) . chr(32), ') ' . sprintf('%F', $spacewidth) . ' (', $txt);
+
         return $this->getOutTextShowing($txt, 'TJ');
     }
 
