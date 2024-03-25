@@ -718,9 +718,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $prev_totwidth = 0;
         $prev_totspacewidth = 0;
         $prev_words = 0;
-        $num_lines = count($dim['split']);
+        $num_words = count($dim['split']);
 
-        for ($word = 0; $word < $num_lines; $word++) {
+        for ($word = 0; $word < $num_words; $word++) {
             $data = $dim['split'][$word];
             $curwidth = ($data['totwidth'] - $prev_totwidth);
             if (($data['septype'] == 'B') || ($curwidth >= $line_width)) {
@@ -728,6 +728,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                     $data = $dim['split'][($word - 1)];
                     --$word;
                 }
+
                 $posend = $data['pos'];
                 $lines[] = [
                     'pos' => $posstart,
@@ -741,6 +742,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
                 $posstart = $posend + 1; // skip word separator
                 $prev_spaces = $data['spaces'];
+                if ($data['septype'] == 'WS') {
+                    ++$prev_spaces;
+                }
                 $prev_totwidth = $data['totwidth'];
                 $prev_totspacewidth = $data['totspacewidth'];
                 $prev_words = $word;
