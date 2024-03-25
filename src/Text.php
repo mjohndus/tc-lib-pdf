@@ -740,15 +740,17 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                     'words' => ($word - $prev_words),
                 ];
 
-                $posstart = $posend + 1; // skip word separator
+                $chrwidth = $this->font->getCharWidth($data['ord']);
+                $prev_totwidth = $data['totwidth'] + $chrwidth;
+                $prev_totspacewidth = $data['totspacewidth'];
                 $prev_spaces = $data['spaces'];
                 if ($data['septype'] == 'WS') {
                     ++$prev_spaces;
+                    $prev_totspacewidth += $chrwidth;
                 }
-                $prev_totwidth = $data['totwidth'] + $this->font->getCharWidth($data['ord']);
-                $prev_totspacewidth = $data['totspacewidth'];
                 $prev_words = $word;
                 $line_width = $pwidth;
+                $posstart = $posend + 1; // skip word separator
             }
         }
 
