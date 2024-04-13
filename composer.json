@@ -22,6 +22,7 @@
     "php": ">=8.0",
     "ext-date": "*",
     "ext-pcre": "*",
+    "mjohndus/tc-lib-barcode": "dev-mjohndus",
     "tecnickcom/tc-lib-color": "^2.0",
     "tecnickcom/tc-lib-pdf-image": "^2.0",
     "tecnickcom/tc-lib-pdf-font": "^2.2",
