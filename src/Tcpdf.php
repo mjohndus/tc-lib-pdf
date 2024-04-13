@@ -268,7 +268,7 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
                 $out .= $this->graph->getBasicRect(($posx + $bar[0]), ($posy + $bar[1]), $bar[2], $bar[3], 'f');
             }
         }
-        
+
         return $out . $this->graph->getStopTransform();
     }
 
