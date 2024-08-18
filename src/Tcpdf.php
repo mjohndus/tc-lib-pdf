@@ -19,6 +19,10 @@ namespace Com\Tecnick\Pdf;
 use Com\Tecnick\Barcode\Exception as BarcodeException;
 use Com\Tecnick\Pdf\Encrypt\Encrypt as ObjEncrypt;
 use Com\Tecnick\Pdf\Exception as PdfException;
+use Com\Tecnick\Color\Pdf as ObjColor;
+use Com\Tecnick\Pdf\Font\Stack as ObjFont;
+use Com\Tecnick\Pdf\Graph\Draw as ObjGraph;
+use Com\Tecnick\Pdf\Image\Import as ObjImage;
 
 /**
  * Com\Tecnick\Pdf\Tcpdf
@@ -34,8 +38,14 @@ use Com\Tecnick\Pdf\Exception as PdfException;
  * @link      https://github.com/tecnickcom/tc-lib-pdf
  *
  * @phpstan-import-type StyleDataOpt from \Com\Tecnick\Pdf\Graph\Base
+ * @phpstan-import-type PageData from \Com\Tecnick\Pdf\Page\Box
  *
  * @phpstan-import-type TAnnotOpts from Output
+ * @phpstan-import-type TSignature from Output
+ * @phpstan-import-type TSignTimeStamp from Output
+ * @phpstan-import-type TGTransparency from Output
+ * @phpstan-import-type TUserRights from Output
+ * @phpstan-import-type TXOBject from Output
  *
  * @SuppressWarnings(PHPMD.DepthOfInheritance)
  */
@@ -71,10 +81,7 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
         $this->setPDFMode($mode);
         $this->setCompressMode($compress);
         $this->setPDFVersion();
-        $this->initClassObjects();
-        if ($objEncrypt instanceof \Com\Tecnick\Pdf\Encrypt\Encrypt) {
-            $this->encrypt = $objEncrypt;
-        }
+        $this->initClassObjects($objEncrypt);
     }
 
     /**
@@ -294,6 +301,21 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
             'subtype' => 'text',
         ]
     ): int {
+        if (!empty($this->xobjtid)) {
+            // Store annotationparameters for later use on a XObject template.
+            $this->xobjects[$this->xobjtid]['annotations'][] = [
+                'n' => 0,
+                'x' => $posx,
+                'y' => $posy,
+                'w' => $width,
+                'h' => $height,
+                'txt' => $txt,
+                'opt' => $opt,
+            ];
+
+            return 0;
+        }
+
         $oid = ++$this->pon;
         $this->annotation[$oid] = [
             'n' => $oid,
@@ -339,5 +361,500 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
         }
 
         return $oid;
+    }
+
+    /**
+     * Set User's Rights for the PDF Reader.
+     * WARNING: This is experimental and currently doesn't work because requires a private key.
+     * Check the PDF Reference 8.7.1 Transform Methods,
+     * Table 8.105 Entries in the UR transform parameters dictionary.
+     *
+     * @param TUserRights $rights User rights:
+     *        - annots (string) Names specifying additional annotation-related usage rights for the document.
+     *          Valid names in PDF 1.5 and later are /Create/Delete/Modify/Copy/Import/Export, which permit
+     *          the user to perform the named operation on annotations.
+     *        - document (string) Names specifying additional document-wide usage rights for the document.
+     *          The only defined value is "/FullSave", which permits a user to save the document along with
+     *          modified form and/or annotation data.
+     *        - ef (string) Names specifying additional usage rights for named embedded files in the document.
+     *          Valid names are /Create/Delete/Modify/Import, which permit the user to perform the named
+     *          operation on named embedded files Names specifying additional embedded-files-related usage
+     *          rights for the document.
+     *        - enabled (bool) If true enable user's rights on PDF reader.
+     *        - form (string) Names specifying additional form-field-related usage rights for the document.
+     *          Valid names are: /Add/Delete/FillIn/Import/Export/SubmitStandalone/SpawnTemplate.
+     *        - formex (string) Names specifying additional form-field-related usage rights. The only valid
+     *          name is BarcodePlaintext, which permits text form field data to be encoded as a plaintext
+     *          two-dimensional barcode.
+     *        - signature (string) Names specifying additional signature-related usage rights for the document.
+     *          The only defined value is /Modify, which permits a user to apply a digital signature to an
+     *          existing signature form field or clear a signed signature form field.
+     */
+    public function setUserRights(array $rights): void
+    {
+        $this->userrights = array_merge($this->userrights, $rights);
+    }
+
+    /**
+     * Enable document signature (requires the OpenSSL Library).
+     * The digital signature improve document authenticity and integrity and allows
+     * to enable extra features on PDF Reader.
+     *
+     * To create self-signed signature:
+     *   openssl req -x509 -nodes -days 365000 -newkey rsa:1024 -keyout tcpdf.crt -out tcpdf.crt
+     * To export crt to p12:
+     *   openssl pkcs12 -export -in tcpdf.crt -out tcpdf.p12
+     * To convert pfx certificate to pem:
+     *   openssl pkcs12 -in tcpdf.pfx -out tcpdf.crt -nodes
+     *
+     * @param TSignature $data Signature data:
+     *        - appearance (array) Signature appearance.
+     *            - empty (bool) Array of empty signatures:
+     *                - objid (int) Object id.
+     *                - name (string) Name of the signature field.
+     *                - page (int) Page number.
+     *                - rect (array) Rectangle of the signature field.
+     *            - name (string) Name of the signature field.
+     *            - page (int) Page number.
+     *            - rect (array) Rectangle of the signature field.
+     *        - approval (bool) Enable approval signature eg. for PDF incremental update.
+     *        - cert_type (int) The access permissions granted for this document. Valid values shall be:
+     *            1 = No changes to the document shall be permitted;
+     *                any change to the document shall invalidate the signature;
+     *            2 = Permitted changes shall be filling in forms, instantiating page templates, and signing;
+     *            other changes shall invalidate the signature;
+     *            3 = Permitted changes shall be the same as for 2, as well as annotation creation,
+     *                deletion, and modification;
+     *            other changes shall invalidate the signature.
+     *        - extracerts (string) Specifies the name of a file containing a bunch of extra certificates
+     *          to include in the signature
+     *            which can for example be used to help the recipient to verify the certificate that you used.
+     *        - info (array) Optional information.
+     *            - ContactInfo (string)
+     *            - Location (string)
+     *            - Name (string)
+     *            - Reason (string)
+     *        - password (string)
+     *        - privkey (string) Private key (string or filename prefixed with 'file://').
+     *        - signcert (string) Signing certificate (string or filename prefixed with 'file://').
+     */
+    public function setSignature(array $data): void
+    {
+        $this->signature = array_merge($this->signature, $data);
+
+        if (empty($this->signature['signcert'])) {
+            throw new PdfException('Invalid signing certificate (signcert)');
+        }
+
+        if (empty($this->signature['privkey'])) {
+            $this->signature['privkey'] = $this->signature['signcert'];
+        }
+
+        ++$this->pon;
+        $this->objid['signature'] = $this->pon; // Signature widget annotation object id.
+        ++$this->pon; // Signature appearance object id ($this->objid['signature'] + 1).
+
+        $this->setSignAnnotRefs();
+
+        $this->sign = true;
+    }
+
+
+    /**
+     * Enable or disable the the Signature Approval
+     *
+     * @param bool $enabled It true enable the Signature Approval
+     */
+    protected function enableSignatureApproval(bool $enabled = true): static
+    {
+        $this->sigapp = $enabled;
+        $this->page->enableSignatureApproval($this->sigapp);
+        return $this;
+    }
+
+    /**
+     * Set the signature timestamp.
+     *
+     * @param TSignTimeStamp $data Signature timestamp data:
+     *        - enabled (bool) If true enable timestamp signature.
+     *        - host (string) Time Stamping Authority (TSA) server (prefixed with 'https://')
+     *        - username (string) TSA username or authorization PEM file.
+     *        - password (string) TSA password.
+     *        - cert (string) cURL optional location of TSA certificate for authorization.
+     */
+    public function setSignTimeStamp(array $data): void
+    {
+        $this->sigtimestamp = array_merge($this->sigtimestamp, $data);
+
+        if ($this->sigtimestamp['enabled'] && empty($this->sigtimestamp['host'])) {
+            throw new PdfException('Invalid TSA host');
+        }
+    }
+
+    /**
+     * Get a signature appearance (page and rectangle coordinates).
+     *
+     * @param float $posx Abscissa of the upper-left corner.
+     * @param float $posy Ordinate of the upper-left corner.
+     * @param float $width Width of the signature area.
+     * @param float $heigth Height of the signature area.
+     * @param int $page Page number (pid).
+     * @param string $name Name of the signature.
+     *
+     * @return array{
+     *           'name': string,
+     *           'page': int,
+     *           'rect': string,
+     *         } Array defining page and rectangle coordinates of signature appearance.
+     */
+    protected function getSignatureAppearanceArray(
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $heigth = 0,
+        int $page = -1,
+        string $name = ''
+    ): array {
+        $sigapp = [];
+
+        $sigapp['page'] = ($page < 1) ? $this->page->getPage()['pid'] : $page;
+        $sigapp['name'] = (empty($name)) ? 'Signature' : $name;
+
+        $pntx = $this->toPoints($posx);
+        $pnty = $this->toYUnit(($posy + $heigth), $this->page->getPage($sigapp['page'])['pheight']);
+        $pntw = $this->toPoints($width);
+        $pnth = $this->toPoints($heigth);
+
+        $sigapp['rect'] = sprintf('%F %F %F %F', $pntx, $pnty, ($pntx + $pntw), ($pnty + $pnth));
+
+        return $sigapp;
+    }
+
+    /**
+     * Set the digital signature appearance (a cliccable rectangle area to get signature properties).
+     *
+     * @param float $posx Abscissa of the upper-left corner.
+     * @param float $posy Ordinate of the upper-left corner.
+     * @param float $width Width of the signature area.
+     * @param float $heigth Height of the signature area.
+     * @param int $page option page number (if < 0 the current page is used).
+     * @param string $name Name of the signature.
+     */
+    public function setSignatureAppearance(
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $heigth = 0,
+        int $page = -1,
+        string $name = ''
+    ): void {
+        $data = $this->getSignatureAppearanceArray($posx, $posy, $width, $heigth, $page, $name);
+        $this->signature['appearance']['page'] = $data['page'];
+        $this->signature['appearance']['name'] = $data['name'];
+        $this->signature['appearance']['rect'] = $data['rect'];
+        $this->setSignAnnotRefs();
+    }
+
+    /**
+     * Add an empty digital signature appearance (a cliccable rectangle area to get signature properties).
+     *
+     * @param float $posx Abscissa of the upper-left corner.
+     * @param float $posy Ordinate of the upper-left corner.
+     * @param float $width Width of the signature area.
+     * @param float $heigth Height of the signature area.
+     * @param int $page option page number (if < 0 the current page is used).
+     * @param string $name Name of the signature.
+     */
+    public function addEmptySignatureAppearance(
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $heigth = 0,
+        int $page = -1,
+        string $name = ''
+    ): void {
+        ++$this->pon;
+        $data = $this->getSignatureAppearanceArray($posx, $posy, $width, $heigth, $page, $name);
+        $this->signature['appearance']['empty'][] = [
+            'objid' => $this->pon,
+            'name' => $data['name'],
+            'page' => $data['page'],
+            'rect' => $data['rect'],
+        ];
+        $this->setSignAnnotRefs();
+    }
+
+    /*
+    * Set the signature annotation references.
+    */
+    protected function setSignAnnotRefs(): void
+    {
+        if (empty($this->objid['signature'])) {
+            return;
+        }
+
+        if (!empty($this->signature['appearance']['page'])) {
+            $this->page->addAnnotRef($this->objid['signature'], $this->signature['appearance']['page']);
+        }
+
+        if (empty($this->signature['appearance']['empty'])) {
+            return;
+        }
+
+        foreach ($this->signature['appearance']['empty'] as $esa) {
+            $this->page->addAnnotRef($esa['objid'], $esa['page']);
+        }
+    }
+
+    /**
+     * Create a new XObject template and return the object id.
+     *
+     * An XObject Template is a PDF block that is a self-contained description
+     * of any sequence of graphics objects (including path objects, text objects,
+     * and sampled images). An XObject Template may be painted multiple times,
+     * either on several pages or at several locations on the same page and
+     * produces the same results each time, subject only to the graphics state
+     * at the time it is invoked.
+     *
+     * @param float $width  Width of the XObject.
+     * @param float $heigth Height of the XObject.
+     * @param ?TGTransparency $transpgroup Optional group attributes.
+     *
+     * @return string XObject template object ID.
+     */
+    public function newXObjectTemplate(
+        float $width = 0,
+        float $heigth = 0,
+        ?array $transpgroup = null,
+    ): string {
+        $oid = ++$this->pon;
+        $tid = 'XT' . $oid;
+        $this->xobjtid = $tid;
+
+        $region = $this->page->getRegion();
+
+        if (empty($width) || $width < 0) {
+            $width = $region['RW'];
+        }
+
+        if (empty($heigth) || $heigth < 0) {
+            $heigth = $region['RH'];
+        }
+
+        $this->xobjects[$tid] = [
+            'spot_colors' => [],
+            'extgstate' => [],
+            'gradient' => [],
+            'font' => [],
+            'image' => [],
+            'xobject' => [],
+            'annotations' => [],
+            'id' => $tid,
+            'n' => $oid,
+            'x' => 0,
+            'y' => 0,
+            'w' => $width,
+            'h' => $heigth,
+            'outdata' => '',
+            'transparency' => $transpgroup,
+        ];
+
+        return $tid;
+    }
+
+    /**
+     * Exit from the XObject template mode.
+     *
+     * See: newXObjectTemplate.
+     */
+    public function exitXObjectTemplate(): void
+    {
+        $this->xobjtid = '';
+    }
+
+    /**
+     * Returns the PDF code to render the specified XObject template.
+     *
+     * See: newXObjectTemplate.
+     *
+     * @param string      $tid         The XObject Template object as returned by the newXObjectTemplate method.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $height      Height.
+     * @param string      $valign      Vertical alignment inside the specified box: T=top; C=center; B=bottom.
+     * @param string      $halign      Horizontal alignment inside the specified box: L=left; C=center; R=right.
+     *
+     * @return string The PDF code to render the specified XObject template.
+     */
+    public function getXObjectTemplate(
+        string $tid,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $height = 0,
+        string $valign = 'T',
+        string $halign = 'L',
+    ): string {
+        $this->xobjtid = '';
+        $region = $this->page->getRegion();
+
+        if (empty($this->xobjects[$tid])) {
+            return '';
+        }
+
+        $xobj = $this->xobjects[$tid];
+
+        if (empty($width) || $width < 0) {
+            $width = min($xobj['w'], $region['RW']);
+        }
+
+        if (empty($height) || $height < 0) {
+            $height = min($xobj['h'], $region['RH']);
+        }
+
+        $tplx = $this->cellHPos($posx, $width, $halign, $this->defcell);
+        $tply = $this->cellVPos($posy, $height, $valign, $this->defcell);
+
+        $this->bbox[] = [
+            'x' => $tplx,
+            'y' => $tply,
+            'w' => $width,
+            'h' => $height,
+        ];
+
+        $out = $this->graph->getStartTransform();
+        $ctm = [
+            0 => ($width / $xobj['w']),
+            1 => 0,
+            2 => 0,
+            3 => ($height / $xobj['h']),
+            4 => $this->toPoints($tplx),
+            5 => $this->toYPoints($tply + $height),
+        ];
+        $out .= $this->graph->getTransformation($ctm);
+        $out .= '/' . $xobj['id'] . ' Do' . "\n";
+        $out .= $this->graph->getStopTransform();
+
+        if (!empty($xobj['annotations'])) {
+            foreach ($xobj['annotations'] as $annot) {
+                // transform original coordinates
+                $clt = $this->graph->getCtmProduct(
+                    $ctm,
+                    array(
+                        1,
+                        0,
+                        0,
+                        1,
+                        $this->toPoints($annot['x']),
+                        $this->toPoints(-$annot['y']),
+                    ),
+                );
+                $anx = $this->toUnit($clt[4]);
+                $any = $this->toYUnit($clt[5] + $this->toUnit($height));
+
+                $crb = $this->graph->getCtmProduct(
+                    $ctm,
+                    array(
+                        1,
+                        0,
+                        0,
+                        1,
+                        $this->toPoints(($annot['x'] + $annot['w'])),
+                        $this->toPoints((-$annot['y'] - $annot['h'])),
+                    ),
+                );
+                $anw = $this->toUnit($crb[4]) - $anx;
+                $anh = $this->toYUnit($crb[5] + $this->toUnit($height)) - $any;
+
+                $out .= $this->setAnnotation(
+                    $anx,
+                    $any,
+                    $anw,
+                    $anh,
+                    $annot['txt'],
+                    $annot['opt']
+                );
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Add the specified raw PDF content to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param string  $data  The raw PDF content data to add.
+     */
+    public function addXObjectContent(string $tid, string $data): void
+    {
+        $this->xobjects[$tid]['outdata'] .= $data;
+    }
+
+    /**
+     * Add the specified XObject ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param string  $key  The XObject key to add.
+     */
+    public function addXObjectXObjectID(string $tid, string $key): void
+    {
+        $this->xobjects[$tid]['xobject'][] = $key;
+    }
+
+    /**
+     * Add the specified Image ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param int     $key  TheImage key to add.
+     */
+    public function addXObjectImageID(string $tid, int $key): void
+    {
+        $this->xobjects[$tid]['image'][] = $key;
+    }
+
+    /**
+     * Add the specified Font ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param string  $key  The Font key to add.
+     */
+    public function addXObjectFontID(string $tid, string $key): void
+    {
+        $this->xobjects[$tid]['font'][] = $key;
+    }
+
+    /**
+     * Add the specified Gradient ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param int     $key  The Gradient key to add.
+     */
+    public function addXObjectGradientID(string $tid, int $key): void
+    {
+        $this->xobjects[$tid]['gradient'][] = $key;
+    }
+
+    /**
+     * Add the specified ExtGState ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param int     $key  The ExtGState key to add.
+     */
+    public function addXObjectExtGStateID(string $tid, int $key): void
+    {
+        $this->xobjects[$tid]['extgstate'][] = $key;
+    }
+
+    /**
+     * Add the specified SpotColor ID to the XObject template.
+     *
+     * @param string  $tid  The XObject Template object as returned by the newXObjectTemplate method.
+     * @param string  $key  The SpotColor key to add.
+     */
+    public function addXObjectSpotColorID(string $tid, string $key): void
+    {
+        $this->xobjects[$tid]['spot_colors'][] = $key;
     }
 }

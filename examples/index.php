@@ -52,6 +52,7 @@ $pdf->setPDFFilename('test_index.pdf');
 
 $bfont1 = $pdf->font->insert($pdf->pon, 'helvetica', '', 12);
 
+
 // ----------
 // Add first page
 
@@ -1001,6 +1002,7 @@ $cnz .= $pdf->graph->getStarPolygon(50, 50, 40, 10, 3, 0, 'CNZ');
 $clipimg = $pdf->image->add('../vendor/tecnickcom/tc-lib-pdf-image/test/images/200x100_CMYK.jpg');
 $cnz .= $pdf->image->getSetImage($clipimg, 10, 10, 80, 80, $page10['height']);
 $cnz .= $pdf->graph->getStopTransform();
+
 $pdf->page->addContent($cnz);
 
 
@@ -1025,7 +1027,6 @@ $styletxt = [
 $pdf->graph->add($styletxt);
 
 
-
 $bfont2 = $pdf->font->insert($pdf->pon, 'times', 'BI', 24);
 
 $pdf->page->addContent($bfont2['out']);
@@ -1042,13 +1043,13 @@ $txt = $pdf->getTextLine(
 
 $pdf->page->addContent($txt);
 
-$bbox = $pdf->getLastTextBBox();
+$bbox = $pdf->getLastBBox();
 
 // Add text
 $txt2 = $pdf->getTextLine(
     'Link to https://tcpdf.org',
     15,
-    ($bbox['y'] + $bbox['height'] + $pdf->toUnit($bfont2['ascent'])),
+    ($bbox['y'] + $bbox['h'] + $pdf->toUnit($bfont2['ascent'])),
     0,
     0,
     0,
@@ -1070,13 +1071,13 @@ $txt2 = $pdf->getTextLine(
 $pdf->page->addContent($txt2);
 
 // get the coordinates of the box containing the last added text string.
-$bbox = $pdf->getLastTextBBox();
+$bbox = $pdf->getLastBBox();
 
 $aoid = $pdf->setAnnotation(
     $bbox['x'],
     $bbox['y'],
-    $bbox['width'],
-    $bbox['height'],
+    $bbox['w'],
+    $bbox['h'],
     'https://tcpdf.org',
     [
         'subtype' => 'Link',
@@ -1296,6 +1297,65 @@ $txt4 = 'Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusant
 
 $txt5 = 'At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus. Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.';
 
+$pdf->enableZeroWidthBreakPoints(true);
+$pdf->addTextCell(
+    "TEST-TEXT-ENABLE-AUTO-BREAK-POINTS", // string $txt,
+    20, // float $posx = 0,
+    233, // float $posy = 0,
+    85, // float $width = 0,
+    0, // float $height = 0,
+    0, // float $offset = 0,
+    0, // float $linespace = 0,
+    'C', // string $valign = 'T',
+    'L', // string $halign = '',
+    null, // ?array $cell = null,
+    $style_cell, // array $styles = [],
+    0, // float $strokewidth = 0,
+    0, // float $wordspacing = 0,
+    0, // float $leading = 0,
+    0, // float $rise = 0,
+    true, // bool $jlast = true,
+    true, // bool $fill = true,
+    false, // bool $stroke = false,
+    false, // bool $clip = false,
+    true, // bool $drawcell = true,
+    '', // string $forcedir = '',
+    null, // ?array $shadow = null,
+);
+
+$pdf->enableZeroWidthBreakPoints(false);
+$pdf->addTextCell(
+    "TEST-TEXT-DISABLE-AUTO-BREAK-POINTS", // string $txt,
+    20, // float $posx = 0,
+    252, // float $posy = 0,
+    85, // float $width = 0,
+    0, // float $height = 0,
+    0, // float $offset = 0,
+    0, // float $linespace = 0,
+    'C', // string $valign = 'T',
+    'L', // string $halign = '',
+    null, // ?array $cell = null,
+    $style_cell, // array $styles = [],
+    0, // float $strokewidth = 0,
+    0, // float $wordspacing = 0,
+    0, // float $leading = 0,
+    0, // float $rise = 0,
+    true, // bool $jlast = true,
+    true, // bool $fill = true,
+    false, // bool $stroke = false,
+    false, // bool $clip = false,
+    true, // bool $drawcell = true,
+    '', // string $forcedir = '',
+    null, // ?array $shadow = null,
+);
+
+// Hyphenation example
+// TEX hyphenation patterns can be downloaded from:
+// https://www.ctan.org/tex-archive/language/hyph-utf8/tex/generic/hyph-utf8/patterns/tex
+//
+//$hyphen_patterns = $pdf->loadTexHyphenPatterns('../../RESOURCES/hyph-la-x-classic.tex');
+//$pdf->setTexHyphenPatterns($hyphen_patterns);
+
 // block of text between two page regions
 $pdf->addTextCell(
     $txt3 . "\n" . $txt4 . "\n" . $txt5, // string $txt,
@@ -1325,6 +1385,91 @@ $pdf->addTextCell(
 
 // ----------
 
+// Page signature
+
+$pageC01 = $pdf->page->add();
+
+/*
+NOTES:
+ - To create self-signed signature:
+   openssl req -x509 -nodes -days 365000 -newkey rsa:1024 -keyout tcpdf.crt -out tcpdf.crt
+ - To export crt to p12:
+   openssl pkcs12 -export -in tcpdf.crt -out tcpdf.p12
+ - To convert pfx certificate to pem:
+   openssl pkcs12 -in tcpdf.pfx -out tcpdf.crt -nodes
+*/
+
+// set certificate file
+$cert = 'file://data/cert/tcpdf.crt';
+
+$sigdata = [
+    // 'appearance' => [
+    //     'empty' => [],
+    //     'name' => '',
+    //     'page' => 0,
+    //     'rect' => '',
+    // ],
+    // 'approval' => '',
+    'cert_type' => 2,
+    // 'extracerts' => null,
+    'info' => [
+        'ContactInfo' => 'http://www.tcpdf.org',
+        'Location' => 'Office',
+        'Name' => 'tc-lib-pdf',
+        'Reason' => 'PDF signature test',
+    ],
+    'password' => 'tcpdfdemo',
+    'privkey' => $cert,
+    'signcert' => $cert,
+];
+
+$pdf->setSignature($sigdata);
+
+$sigimg = $pdf->image->add('./images/tcpdf_signature.png');
+$sigimg_out = $pdf->image->getSetImage($sigimg, 30, 30, 20, 20, $pageC01['height']);
+$pdf->page->addContent($sigimg_out);
+
+$pdf->setSignatureAppearance(30, 30, 20, 20, -1, 'test');
+
+$pdf->addEmptySignatureAppearance(30, 60, 20, 20, -1, 'test');
+
+
+// ----------
+
+// XOBject template (@TODO: fix the implementation)
+
+$pageC02 = $pdf->page->add();
+
+$tid = $pdf->newXObjectTemplate(80, 80, []);
+
+$xcnz = $pdf->graph->getStartTransform();
+$xcnz = $pdf->graph->getStarPolygon(50, 50, 40, 10, 3, 0, 'CNZ');
+$timg = $pdf->image->add('../vendor/tecnickcom/tc-lib-pdf-image/test/images/200x100_GRAY.png');
+$xcnz .= $pdf->image->getSetImage($timg, 10, 10, 80, 80, $pageC02['height']);
+$xcnz .= $pdf->graph->getStopTransform();
+
+$pdf->addXObjectImageID($tid, $timg);
+$pdf->addXObjectContent($tid, $xcnz);
+
+$pdf->exitXObjectTemplate();
+
+$tmpl = $pdf->getXObjectTemplate(
+    $tid,
+    0,
+    0,
+    80,
+    80,
+    'T',
+    'L',
+);
+
+$pdf->page->addContent($tmpl);
+
+// ----------
+
+// =============================================================
+
+// ----------
 // get PDF document as raw string
 $rawpdf = $pdf->getOutPDFString();
 

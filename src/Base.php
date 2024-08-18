@@ -16,16 +16,16 @@
 
 namespace Com\Tecnick\Pdf;
 
-use Com\Tecnick\Barcode\Barcode;
-use Com\Tecnick\Color\Pdf;
-use Com\Tecnick\File\Cache;
-use Com\Tecnick\File\File;
-use Com\Tecnick\Pdf\Encrypt\Encrypt;
-use Com\Tecnick\Pdf\Font\Stack;
-use Com\Tecnick\Pdf\Graph\Draw;
-use Com\Tecnick\Pdf\Image\Import;
-use Com\Tecnick\Pdf\Page\Page;
-use Com\Tecnick\Unicode\Convert;
+use Com\Tecnick\Barcode\Barcode as ObjBarcode;
+use Com\Tecnick\Color\Pdf as ObjColor;
+use Com\Tecnick\File\Cache as ObjCache;
+use Com\Tecnick\File\File as ObjFile;
+use Com\Tecnick\Pdf\Encrypt\Encrypt as ObjEncrypt;
+use Com\Tecnick\Pdf\Font\Stack as ObjFont;
+use Com\Tecnick\Pdf\Graph\Draw as ObjGraph;
+use Com\Tecnick\Pdf\Image\Import as ObjImage;
+use Com\Tecnick\Pdf\Page\Page as ObjPage;
+use Com\Tecnick\Unicode\Convert as ObjUniConvert;
 
 /**
  * Com\Tecnick\Pdf\Base
@@ -60,72 +60,83 @@ use Com\Tecnick\Unicode\Convert;
  *        'NumCopies'?: int,
  *    }
  *
- * @phpstan-import-type TEmbeddedFile from Output
- * @phpstan-import-type TOutline from Output
+ * @phpstan-type TBBox array{
+ *          'x': float,
+ *          'y': float,
+ *          'w': float,
+ *          'h': float,
+ *      }
+ *
+ * @phpstan-type TStackBBox array<int, TBBox>
+ *
  * @phpstan-import-type TAnnot from Output
- * @phpstan-import-type TXOBject from Output
- * @phpstan-import-type TSignature from Output
- * @phpstan-import-type TUserRights from Output
+ * @phpstan-import-type TEmbeddedFile from Output
  * @phpstan-import-type TObjID from Output
+ * @phpstan-import-type TOutline from Output
+ * @phpstan-import-type TSignature from Output
+ * @phpstan-import-type TSignTimeStamp from Output
+ * @phpstan-import-type TGTransparency from Output
+ * @phpstan-import-type TUserRights from Output
+ * @phpstan-import-type TXOBject from Output
  *
  * @SuppressWarnings(PHPMD)
  */
 abstract class Base
 {
-    /**
-     * Encrypt object
-     */
-    public Encrypt $encrypt;
+   /**
+    * Encrypt object.
+    */
+    public ObjEncrypt $encrypt;
 
-    /**
-     * Color object
-     */
-    public Pdf $color;
+   /**
+    * Color object.
+    */
+    public ObjColor $color;
 
-    /**
-     * Barcode object
-     */
-    public Barcode $barcode;
+   /**
+    * Barcode object.
+    */
+    public ObjBarcode $barcode;
 
-    /**
-     * File object
-     */
-    public File $file;
+   /**
+    * File object.
+    */
+    public ObjFile $file;
 
-    /**
-     * Cache object
-     */
-    public Cache $cache;
+   /**
+    * Cache object.
+    */
+    public ObjCache $cache;
 
-    /**
-     * Unicode Convert object
-     */
-    public Convert $uniconv;
+   /**
+    * Unicode Convert object.
+    */
+    public ObjUniConvert $uniconv;
 
-    /**
-     * Page object
-     */
-    public Page $page;
+   /**
+    * Page object.
+    */
+    public ObjPage $page;
 
-    /**
-     * Graph object
-     */
-    public Draw $graph;
+   /**
+    * Graph object.
+    */
+    public ObjGraph $graph;
 
-    /**
-     * Font object
-     */
-    public Stack $font;
+   /**
+    * Font object.
+    */
+    public ObjFont $font;
 
-    /**
-     * Image Import object
-     */
-    public Import $image;
+   /**
+    * Image Import object.
+    */
+    public ObjImage $image;
 
     /**
      * TCPDF version.
      */
-    protected string $version = '8.0.54';
+    protected string $version = '8.0.69';
 
     /**
      * Time is seconds since EPOCH when the document was created.
@@ -334,11 +345,11 @@ abstract class Base
     ];
 
     /**
-     * Store XObject.
+     * Current XOBject template ID.
      *
-     * @var array<string, TXOBject>
+     * @var string
      */
-    protected array $xobject = [];
+    protected string $xobjtid = '';
 
     /**
      * Outlines Data.
@@ -376,7 +387,7 @@ abstract class Base
         ],
         'approval' => '',
         'cert_type' => -1,
-        'extracerts' => '',
+        'extracerts' => null,
         'info' => [
             'ContactInfo' => '',
             'Location' => '',
@@ -386,6 +397,19 @@ abstract class Base
         'password' => '',
         'privkey' => '',
         'signcert' => '',
+    ];
+
+    /**
+     * Signature Timestamp Data.
+     *
+     * @var TSignTimeStamp
+     */
+    protected array $sigtimestamp = [
+        'enabled' => false,
+        'host' => '',
+        'username' => '',
+        'password' => '',
+        'cert' => '',
     ];
 
     /**
@@ -408,13 +432,13 @@ abstract class Base
      * @var TUserRights
      */
     protected array $userrights = [
-        'annots' => '',
-        'document' => '',
-        'ef' => '',
+        'annots' => '/Create/Delete/Modify/Copy/Import/Export',
+        'document' => '/FullSave',
+        'ef' => '/Create/Delete/Modify/Import',
         'enabled' => false,
-        'form' => '',
-        'formex' => '',
-        'signature' => '',
+        'form' => '/Add/Delete/FillIn/Import/Export/SubmitStandalone/SpawnTemplate',
+        'formex' => '', // 'BarcodePlaintext',
+        'signature' => '/Modify',
     ];
 
     /**
@@ -423,6 +447,18 @@ abstract class Base
      * @var array<string, TXOBject>
      */
     protected array $xobjects = [];
+
+    /**
+     * Stack of bounding boxes [x, y, width, height] in user units.
+     *
+     * @var TStackBBox
+     */
+    protected $bbox = [[
+        'x' => 0,
+        'y' => 0,
+        'w' => 0,
+        'h' => 0,
+    ]];
 
     /**
      * Convert user units to internal points unit.

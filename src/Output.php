@@ -330,24 +330,28 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *        'opt': TAnnotOpts,
  *    }
  *
+ * @phpstan-type TGTransparency array{
+ *         'CS': string,
+ *         'I': bool,
+ *         'K': bool,
+ *     }
+ *
  * @phpstan-type TXOBject array{
- *         'extgstates'?: \Com\Tecnick\Pdf\Graph\Draw,
- *         'fonts'?: \Com\Tecnick\Pdf\Font\Stack,
- *         'gradients'?: \Com\Tecnick\Pdf\Graph\Draw,
- *         'group'?: array{
- *             'CS'?: string,
- *             'I'?: bool,
- *             'K'?: bool,
- *         },
- *         'h': float,
- *         'images'?: array<int>,
+ *         'spot_colors': array<string>,
+ *         'extgstate': array<int>,
+ *         'gradient': array<int>,
+ *         'font': array<string>,
+ *         'image': array<int>,
+ *         'xobject': array<string>,
+ *         'annotations': array<int, TAnnot>,
+ *         'transparency'?: ?TGTransparency,
+ *         'id': string,
+ *         'outdata': string,
  *         'n': int,
- *         'outdata'?: string,
- *         'spot_colors'?: \Com\Tecnick\Color\Pdf,
- *         'w': float,
  *         'x': float,
- *         'xobjects'?: array<int, int>,
  *         'y': float,
+ *         'w': float,
+ *         'h': float,
  *     }
  *
  * @phpstan-type TOutline array{
@@ -380,7 +384,7 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *        },
  *        'approval': string,
  *        'cert_type': int,
- *        'extracerts': string,
+ *        'extracerts': ?string,
  *        'info': array{
  *            'ContactInfo': string,
  *            'Location': string,
@@ -390,6 +394,14 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *        'password': string,
  *        'privkey': string,
  *        'signcert': string,
+ *    }
+ *
+ * @phpstan-type TSignTimeStamp array{
+ *        'enabled': bool,
+ *        'host': string,
+ *        'username': string,
+ *        'password': string,
+ *        'cert': string,
  *    }
  *
  * @phpstan-type TUserRights array{
@@ -425,6 +437,13 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  */
 abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
 {
+    /**
+     * Object to export fornt data.
+     *
+     * @var OutFont
+     */
+    protected OutFont $outfont;
+
     /**
      * PDF layers.
      *
@@ -540,13 +559,13 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $out .= $this->graph->getOutExtGState($this->pon);
         $this->pon = $this->graph->getObjectNumber();
         $out .= $this->getOutOCG();
-        $output = new OutFont(
+        $this->outfont = new OutFont(
             $this->font->getFonts(),
             $this->pon,
-            $this->encrypt
+            $this->encrypt,
         );
-        $out .= $output->getFontsBlock();
-        $this->pon = $output->getObjectNumber();
+        $out .= $this->outfont->getFontsBlock();
+        $this->pon = $this->outfont->getObjectNumber();
         $out .= $this->image->getOutImagesBlock($this->pon);
         $this->pon = $this->image->getObjectNumber();
         $out .= $this->color->getPdfSpotObjects($this->pon);
@@ -652,12 +671,12 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         }
 
         $icc = $this->encrypt->encryptString($icc, $oid);
-        return $out . ('<< /N 3 /Filter /FlateDecode /Length ' . strlen($icc)
+        return $out . '<< /N 3 /Filter /FlateDecode /Length ' . strlen($icc)
             . ' >>'
             . ' stream' . "\n"
             . $icc . "\n"
             . 'endstream' . "\n"
-            . 'endobj' . "\n");
+            . 'endobj' . "\n";
     }
 
     /**
@@ -956,12 +975,22 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $stream = trim($stream);
         $oid = ++$this->pon;
         $out = $oid . ' 0 obj' . "\n";
-        $this->xobjects['AX' . $oid] = [
+        $tid = 'AX' . $oid;
+        $this->xobjects[$tid] = [
+            'spot_colors' => [],
+            'extgstate' => [],
+            'gradient' => [],
+            'font' => [],
+            'image' => [],
+            'xobject' => [],
+            'annotations' => [],
+            'id' => $tid,
             'n' => $oid,
-            'h' => 0,
-            'w' => 0,
             'x' => 0,
+            'w' => 0,
             'y' => 0,
+            'h' => 0,
+            'outdata' => '',
         ];
         $out .= '<< /Type /XObject /Subtype /Form /FormType 1';
         if ($this->compress) {
@@ -974,7 +1003,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
 
         $stream = $this->encrypt->encryptString($stream, $oid);
         $rect = sprintf('%F %F', $width, $height);
-        return $out . (' /BBox [0 0 ' . $rect . ']'
+        return $out . ' /BBox [0 0 ' . $rect . ']'
             . ' /Matrix [1 0 0 1 0 0]'
             . ' /Resources 2 0 R'
             . ' /Length ' . strlen($stream)
@@ -982,7 +1011,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             . ' stream' . "\n"
             . $stream . "\n"
             . 'endstream' . "\n"
-            . 'endobj' . "\n");
+            . 'endobj' . "\n";
     }
 
     /**
@@ -991,12 +1020,12 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
     protected function getOutXObjects(): string
     {
         $out = '';
-        foreach ($this->xobject as $data) {
+        foreach ($this->xobjects as $data) {
             if (empty($data['outdata'])) {
                 continue;
             }
 
-            $out .= ' ' . $data['n'] . ' 0 R' . "\n"
+            $out .= $data['n'] . ' 0 obj' . "\n"
                 . '<<'
                 . ' /Type /XObject'
                 . ' /Subtype /Form'
@@ -1017,66 +1046,37 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                 $this->toPoints(($data['w'] + $data['x'])),
                 $this->toPoints(($data['h'] - $data['y']))
             );
-            $out .= ' /Matrix [1 0 0 1 0 0] /Resources << /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]';
-            if (! empty($data['fonts'])) {
-                $fonts = $data['fonts']->getFonts();
-                $out = ' /Font <<';
-                foreach ($fonts as $font) {
-                    $out .= ' /F' . $font['i'] . ' ' . $font['n'] . ' 0 R';
-                }
 
-                $out .= ' >>';
-            }
+            $out .= ' /Matrix [1 0 0 1 0 0]'
+            . ' /Resources <<'
+            . ' /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]';
 
-            if (! empty($data['extgstates'])) {
-                $out .= $data['extgstates']->getOutExtGStateResources();
-            }
+            $out .= $this->graph->getOutExtGStateResourcesByKeys($data['extgstate']);
+            $out .= $this->graph->getOutGradientResourcesByKeys($data['gradient']);
+            $out .= $this->color->getPdfSpotResourcesByKeys($data['spot_colors']);
+            $out .= $this->outfont->getOutFontDictByKeys($data['font']);
 
-            if (! empty($data['gradients'])) {
-                $out .= $data['gradients']->getOutGradientResources();
-            }
-
-            if (! empty($data['spot_colors'])) {
-                $out .= $data['spot_colors']->getPdfSpotResources();
-            }
-
-            // images or nested xobjects
-            if (! empty($data['images']) || ! empty($data['xobjects'])) {
+            if (! empty($data['image']) || ! empty($data['xobject'])) {
                 $out .= ' /XObject <<';
-
-                if (! empty($data['images'])) {
-                    foreach ($data['images'] as $imgid) {
-                        $out .= ' /I' . $imgid . ' ' . $this->xobject['I' . $imgid]['n'] . ' 0 R';
+                $out .= $this->image->getXobjectDictByKeys($data['image']);
+                if (! empty($data['xobject'])) {
+                    foreach ($data['xobject'] as $xid) {
+                        $out .= ' /' . $xid . ' ' . $this->xobjects[$xid]['n'] . ' 0 R';
                     }
                 }
-
-                if (! empty($data['xobjects'])) {
-                    foreach ($data['xobjects'] as $sub_id => $sub_objid) {
-                        $out .= ' /' . $sub_id . ' ' . $sub_objid . ' 0 R';
-                    }
-                }
-
                 $out .= ' >>';
             }
 
-            $out .= ' >>';
-            if (! empty($data['group'])) {
+            $out .= ' >>'; // end of /Resources.
+
+            if (isset($data['transparency'])) {
                 // set transparency group
                 $out .= ' /Group << /Type /Group /S /Transparency';
-                if (is_array($data['group'])) {
-                    if (! empty($data['group']['CS'])) {
-                        $out .= ' /CS /' . $data['group']['CS'];
-                    }
-
-                    if (isset($data['group']['I'])) {
-                        $out .= ' /I /' . ($data['group']['I'] === true ? 'true' : 'false');
-                    }
-
-                    if (isset($data['group']['K'])) {
-                        $out .= ' /K /' . ($data['group']['K'] === true ? 'true' : 'false');
-                    }
+                if (!empty($data['transparency'])) {
+                    $out .= ' /CS /' . $data['transparency']['CS'];
+                    $out .= ' /I /' . (($data['transparency']['I'] === true) ? 'true' : 'false');
+                    $out .= ' /K /' . (($data['transparency']['K'] === true) ? 'true' : 'false');
                 }
-
                 $out .= ' >>';
             }
 
@@ -1101,9 +1101,9 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         return $this->objid['resdic'] . ' 0 obj' . "\n"
             . '<<'
             . ' /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]'
-            . $this->getOutFontDic()
-            . $this->getXObjectDic()
-            . $this->getLayerDic()
+            . $this->outfont->getOutFontDict()
+            . $this->getXObjectDict()
+            . $this->getLayerDict()
             . $this->graph->getOutExtGStateResources()
             . $this->graph->getOutGradientResources()
             . $this->color->getPdfSpotResources()
@@ -1132,8 +1132,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             $out .= ' /' . $name . ' ' . sprintf('[%u 0 R /XYZ %F %F null]', $poid, $pgx, $pgy);
         }
 
-        return $out . (' >>' . "\n"
-            . 'endobj' . "\n");
+        return $out . ' >>' . "\n"
+            . 'endobj' . "\n";
     }
 
     /**
@@ -1247,6 +1247,9 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $pages = $this->page->getPages();
         foreach ($pages as $num => $page) {
             foreach ($page['annotrefs'] as $key => $oid) {
+                if (empty($this->annotation[$oid])) {
+                    continue;
+                }
                 $annot = $this->annotation[$oid];
                 $annot['opt'] = array_change_key_case($annot['opt'], CASE_LOWER);
                 $out .= $this->getAnnotationRadiobuttonGroups($annot); // @phpstan-ignore-line
@@ -1743,7 +1746,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         if (! empty($annot['txt']) && is_string($annot['txt'])) {
             switch ($annot['txt'][0]) {
                 case '#': // internal destination
-                    $out .= ' /A << /S /GoTo /D /' . $this->encrypt->encodeNameObject(substr($annot['txt'], 1)) . '>>';
+                    $out .= ' /A << /S /GoTo /D /'
+                    . $this->encrypt->encodeNameObject(substr($annot['txt'], 1)) . '>>';
                     break;
                 case '%': // embedded PDF file
                     $filename = basename(substr($annot['txt'], 1));
@@ -1776,7 +1780,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                         }
 
                         $out .= ' /A << /S /GoToR /D ' . $dest
-                            . ' /F ' . $this->encrypt->escapeDataString($this->unhtmlentities($parsedUrl['path']), $oid)
+                            . ' /F '
+                            . $this->encrypt->escapeDataString($this->unhtmlentities($parsedUrl['path']), $oid)
                             . ' /NewWindow true'
                             . ' >>';
                     } else {
@@ -2643,18 +2648,18 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             }
 
             $out .= ' /Count 0 >>' . "\n"
-                . 'endobj';
+                . 'endobj' . "\n";
         }
 
         //Outline root
         $this->outlinerootoid = ++$this->pon;
-        return $out . ($this->outlinerootoid . ' 0 obj' . "\n"
+        return $out . $this->outlinerootoid . ' 0 obj' . "\n"
             . '<<'
             . ' /Type /Outlines'
             . ' /First ' . $first_oid . ' 0 R'
             . ' /Last ' . ($first_oid + $root_oid) . ' 0 R'
             . ' >>' . "\n"
-            . 'endobj');
+            . 'endobj' . "\n";
     }
 
     /**
@@ -2681,7 +2686,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                 . ' /T ' . $this->getOutTextString($signame, $esa['objid'], true)
                 . ' /Ff 0'
                 . ' >>'
-                . "\n" . 'endobj';
+                . "\n" . 'endobj' . "\n";
         }
 
         return $out;
@@ -2729,26 +2734,15 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             throw new PdfException('Unable to create temporary signature file');
         }
 
-        if (empty($this->signature['extracerts'])) {
-            openssl_pkcs7_sign(
-                $tempdoc,
-                $tempsign,
-                $this->signature['signcert'],
-                [$this->signature['privkey'], $this->signature['password']],
-                [],
-                PKCS7_BINARY | PKCS7_DETACHED
-            );
-        } else {
-            openssl_pkcs7_sign(
-                $tempdoc,
-                $tempsign,
-                $this->signature['signcert'],
-                [$this->signature['privkey'], $this->signature['password']],
-                [],
-                PKCS7_BINARY | PKCS7_DETACHED,
-                $this->signature['extracerts']
-            );
-        }
+        openssl_pkcs7_sign(
+            $tempdoc,
+            $tempsign,
+            $this->signature['signcert'],
+            [$this->signature['privkey'], $this->signature['password']],
+            [],
+            PKCS7_BINARY | PKCS7_DETACHED,
+            $this->signature['extracerts']
+        );
 
         // read signature
         $signature = $this->file->getFileData($tempsign);
@@ -2787,6 +2781,11 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function applySignatureTimestamp(string $signature): string
     {
+        if (!$this->sigtimestamp['enabled']) {
+            return $signature;
+        }
+
+        // @TODO: Add TSA timestamp to the signature
         return $signature;
     }
 
@@ -2815,7 +2814,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             . ' /Ff 0'
             . ' /V ' . $oid . ' 0 R'
             . ' >>' . "\n"
-            . 'endobj';
+            . 'endobj' . "\n";
         $out .= $oid . ' 0 obj' . "\n";
         $out .= '<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached '
             . $this::BYTERANGE
@@ -2830,17 +2829,17 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
 
             // optional digest data (values must be calculated and replaced later)
             //$out .= ' /Data ********** 0 R'
-            //    .' /DigestMethod/MD5'
+            //    .' /DigestMethod /MD5'
             //    .' /DigestLocation[********** 34]'
             //    .' /DigestValue<********************************>';
             $out .= ' >> ]'; // end of reference
         }
 
         $out .= $this->getOutSignatureInfo($oid);
-        return $out . (' /M '
+        return $out . ' /M '
             . $this->getOutDateTimeString($this->docmodtime, $oid)
             . ' >>' . "\n"
-            . 'endobj');
+            . 'endobj' . "\n";
     }
 
     /**
@@ -2852,9 +2851,12 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             return '';
         }
 
-        return ' /TransformMethod /DocMDP /TransformParams << /Type /TransformParams /P '
-            . $this->signature['cert_type']
-            . ' /V /1.2 >>';
+        return ' /TransformMethod /DocMDP '
+            . '/TransformParams <<'
+            . ' /Type /TransformParams'
+            . ' /P ' . $this->signature['cert_type']
+            . ' /V /1.2'
+            . ' >>';
     }
 
     /**
@@ -2918,47 +2920,32 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
     }
 
     /**
-     * Get the PDF output string for Font resources dictionary.
-     */
-    protected function getOutFontDic(): string
-    {
-        $fonts = $this->font->getFonts();
-        if ($fonts === []) {
-            return '';
-        }
-
-        $out = ' /Font <<';
-        foreach ($fonts as $font) {
-            $out .= ' /F' . $font['i'] . ' ' . $font['n'] . ' 0 R';
-        }
-
-        return $out . ' >>';
-    }
-
-    /**
      * Get the PDF output string for XObject resources dictionary.
      */
-    protected function getXObjectDic(): string
+    protected function getXObjectDict(): string
     {
         $out = ' /XObject <<';
-        foreach ($this->xobject as $id => $oid) {
+
+        foreach ($this->xobjects as $id => $oid) {
             $out .= ' /' . $id . ' ' . $oid['n'] . ' 0 R';
         }
 
         $out .= $this->image->getXobjectDict();
+
         return $out . ' >>';
     }
 
     /**
      * Get the PDF output string for Layer resources dictionary.
      */
-    protected function getLayerDic(): string
+    protected function getLayerDict(): string
     {
         if (empty($this->pdflayer)) {
             return '';
         }
 
         $out = ' /Properties <<';
+
         foreach ($this->pdflayer as $layer) {
             $out .= ' /' . $layer['layer'] . ' ' . $layer['objid'] . ' 0 R';
         }
