@@ -723,7 +723,6 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
             'h' => $height,
         ];
 
-        $out = $this->graph->getStartTransform();
         $ctm = [
             0 => ($width / $xobj['w']),
             1 => 0,
@@ -732,6 +731,8 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
             4 => $this->toPoints($tplx),
             5 => $this->toYPoints($tply + $height),
         ];
+
+        $out = $this->graph->getStartTransform();
         $out .= $this->graph->getTransformation($ctm);
         $out .= '/' . $xobj['id'] . ' Do' . "\n";
         $out .= $this->graph->getStopTransform();
