@@ -16,6 +16,7 @@
 
 namespace Com\Tecnick\Pdf;
 
+use Com\Tecnick\Pdf\Exception as PdfException;
 use Com\Tecnick\Barcode\Barcode as ObjBarcode;
 use Com\Tecnick\Color\Pdf as ObjColor;
 use Com\Tecnick\File\Cache as ObjCache;
@@ -39,6 +40,10 @@ use Com\Tecnick\Unicode\Convert as ObjUniConvert;
  * @copyright 2002-2024 Nicola Asuni - Tecnick.com LTD
  * @license   http://www.gnu.org/copyleft/lesser.html GNU-LGPL v3 (see LICENSE.TXT)
  * @link      https://github.com/tecnickcom/tc-lib-pdf
+ *
+ * @phpstan-import-type PageInputData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type PageData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type TFontMetric from \Com\Tecnick\Pdf\Font\Stack
  *
  * @phpstan-type TViewerPref array{
  *        'HideToolbar'?: bool,
@@ -66,6 +71,37 @@ use Com\Tecnick\Unicode\Convert as ObjUniConvert;
  *          'w': float,
  *          'h': float,
  *      }
+ *
+ * @phpstan-type TCellDef array{
+ *        'margin': array{
+ *            'T': float,
+ *            'R': float,
+ *            'B': float,
+ *            'L': float,
+ *        },
+ *        'padding': array{
+ *            'T': float,
+ *            'R': float,
+ *            'B': float,
+ *            'L': float,
+ *        },
+ *       'borderpos': float,
+ *    }
+ *
+ *
+ * @phpstan-type TRefUnitValues array{
+ *    'parent': float,
+ *    'font': array{
+ *       'rootsize': float,
+ *       'size': float,
+ *       'xheight': float,
+ *       'zerowidth': float,
+ *    },
+ *    'viewport': array{
+ *       'width': float,
+ *       'height': float,
+ *    },
+ * }
  *
  * @phpstan-type TStackBBox array<int, TBBox>
  *
@@ -136,7 +172,7 @@ abstract class Base
     /**
      * TCPDF version.
      */
-    protected string $version = '8.0.72';
+    protected string $version = '8.0.79';
 
     /**
      * Time is seconds since EPOCH when the document was created.
@@ -219,9 +255,31 @@ abstract class Base
     protected string $unit = 'mm';
 
     /**
+     * Valid HTML/CSS/SVG units.
+     *
+     * @var array<string>
+     */
+    protected const VALIDUNITS = [
+        '%', 'ch', 'cm', 'em', 'ex',
+        'in', 'mm', 'pc', 'pt', 'px',
+        'rem', 'vh', 'vmax', 'vmin', 'vw',
+    ];
+
+    /**
+     * DPI (Dot Per Inch) Document Resolution (do not change).
+     * 1pt = 1/72 of 1in.
+     */
+    protected float $dpi = 72.0;
+
+    /**
      * Unit of measure conversion ratio.
      */
     protected float $kunit = 1.0;
+
+    /**
+     * Ratio between an internal point and pixel size.
+     */
+    protected float $pointtopixelratio = 1.0;
 
     /**
      * Version of the PDF/A mode or 0 otherwise.
@@ -453,12 +511,71 @@ abstract class Base
      *
      * @var TStackBBox
      */
-    protected $bbox = [[
+    protected array $bbox = [[
         'x' => 0,
         'y' => 0,
         'w' => 0,
         'h' => 0,
     ]];
+
+    /**
+     * Set to true to enable the default page footer.
+     *
+     * @var bool
+     */
+    protected bool $defPageContentEnabled = false;
+
+    /**
+     * Default font for defautl page content.
+     *
+     * @var ?TFontMetric
+     */
+    protected ?array $defaultfont = null;
+    /**
+     * The default relative position of the cell origin when
+     * the border is centered on the cell edge.
+     */
+    public const BORDERPOS_DEFAULT = 0;
+
+    /**
+     * The relative position of the cell origin when
+     * the border is external to the cell edge.
+     */
+    public const BORDERPOS_EXTERNAL = -0.5; //-1/2
+
+    /**
+     * The relative position of the cell origin when
+     * the border is internal to the cell edge.
+     */
+    public const BORDERPOS_INTERNAL = 0.5; // 1/2
+
+    /**
+     * Default values for cell.
+     *
+     * @const TCellDef
+     */
+    public const ZEROCELL = [
+        'margin' => [
+            'T' => 0,
+            'R' => 0,
+            'B' => 0,
+            'L' => 0,
+        ],
+        'padding' => [
+            'T' => 0,
+            'R' => 0,
+            'B' => 0,
+            'L' => 0,
+        ],
+        'borderpos' => self::BORDERPOS_DEFAULT,
+    ];
+
+    /**
+     * Default values for cell.
+     *
+     * @var TCellDef
+     */
+    protected $defcell = self::ZEROCELL;
 
     /**
      * Convert user units to internal points unit.
@@ -504,5 +621,109 @@ abstract class Base
     {
         $pageh = $pageh >= 0 ? $pageh : $this->page->getPage()['pheight'];
         return $this->toUnit($pageh - $pnt);
+    }
+
+    /**
+     * Enable or disable the default page content.
+     *
+     * @param bool $enable Enable or disable the default page content.
+     *
+     * @return void
+     */
+    public function enableDefaultPageContent(bool $enable = true): void
+    {
+        $this->defPageContentEnabled = $enable;
+    }
+
+    /**
+     * Set the pixel/point ratio used to convert pixel values to points.
+     *
+     * @param float $val
+     *
+     * @return void
+     */
+    public function setPointToPixelRatio(float $val): void
+    {
+        $this->pointtopixelratio = $val;
+    }
+
+    /**
+     * Converts a string containing value and unit of measure to internal points.
+     * This is used to convert values for SVG, CSS, HTML.
+     *
+     * @param string|float|int $val String containing values and unit.
+     * @param TRefUnitValues $ref Reference values in points.
+     * @param string $defunit Default unit (can be one of the VALIDUNITS).
+     *
+     * @return float Internal points value.
+     */
+    public function getUnitValuePoints(
+        string|float|int $val,
+        array $ref = [
+            'parent' => 1.0,
+            'font' => [
+                'rootsize' => 10.0,
+                'size' => 10.0,
+                'xheight' => 5.0,
+                'zerowidth' => 3.0,
+            ],
+            'viewport' => [
+                'width' => 1000.0,
+                'height' => 1000.0,
+            ],
+        ],
+        string $defunit = 'px',
+    ): float {
+        $unit = 'px';
+        if (in_array($defunit, self::VALIDUNITS)) {
+            $unit = $defunit;
+        }
+
+        $value = 0.0;
+        if (is_numeric($val)) {
+            $value = floatval($val);
+        } elseif (preg_match('/([0-9\.\-\+]+)([a-z%]{0,4})/', $val, $match)) {
+            $value = floatval($match[1]);
+            if (in_array($match[2], self::VALIDUNITS)) {
+                $unit = $match[2];
+            }
+        } else {
+            throw new PdfException('Invalid value: ' . $val);
+        }
+
+        return match ($unit) {
+            // Percentage relative to the parent element.
+            '%' => (($value * $ref['parent']) / 100),
+            // Relative to the width of the "0" (zero)
+            'ch' => ($value * $ref['font']['zerowidth']),
+            // Centimeters.
+            'cm' => (($value * $this->dpi) / 2.54),
+            // Relative to the font-size of the element.
+            'em' => ($value * $ref['font']['size']),
+            // Relative to the x-height of the current font.
+            'ex' => ($value * $ref['font']['xheight']),
+            // Inches.
+            'in' => ($value * $this->dpi),
+            // Millimeters.
+            'mm' => (($value * $this->dpi) / 25.4),
+            // One pica is 12 points.
+            'pc' => ($value * 12),
+            // Points.
+            'pt' => $value,
+            // Pixels.
+            'px' => ($value * $this->pointtopixelratio),
+            // Relative to font-size of the root element.
+            'rem' => ($value * $ref['font']['rootsize']),
+            // Relative to 1% of the height of the viewport.
+            'vh' => (($value * $ref['viewport']['height']) / 100),
+            // Relative to 1% of viewport's* larger dimension.
+            'vmax' => (($value * max($ref['viewport']['height'], $ref['viewport']['width'])) / 100),
+            // Relative to 1% of viewport's smaller dimension.
+            'vmin' => (($value * min($ref['viewport']['height'], $ref['viewport']['width'])) / 100),
+            // Relative to 1% of the width of the viewport.
+            'vw' => (($value * $ref['viewport']['width']) / 100),
+            // Default to pixels.
+            default => ($value * $this->pointtopixelratio),
+        };
     }
 }

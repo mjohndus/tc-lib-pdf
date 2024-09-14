@@ -32,8 +32,10 @@ use Com\Tecnick\Pdf\Exception as PdfException;
  * @link      https://github.com/tecnickcom/tc-lib-pdf
  *
  * @phpstan-import-type TViewerPref from Base
+ *
+ * @SuppressWarnings(PHPMD.DepthOfInheritance)
  */
-abstract class MetaInfo extends \Com\Tecnick\Pdf\Text
+abstract class MetaInfo extends \Com\Tecnick\Pdf\JavaScript
 {
     /**
      * Valid document zoom modes
@@ -516,7 +518,7 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\Text
     protected function getBooleanMode(string $name): string
     {
         if (isset($this->viewerpref[$name])) {
-            return ' /' . $name . ' ' . var_export((bool) $this->viewerpref[$name], true);
+            return ' /' . $name . ' ' . ($this->viewerpref[$name] === true ? 'true' : 'false');
         }
 
         return '';

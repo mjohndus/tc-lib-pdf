@@ -19,10 +19,6 @@ namespace Com\Tecnick\Pdf;
 use Com\Tecnick\Barcode\Exception as BarcodeException;
 use Com\Tecnick\Pdf\Encrypt\Encrypt as ObjEncrypt;
 use Com\Tecnick\Pdf\Exception as PdfException;
-use Com\Tecnick\Color\Pdf as ObjColor;
-use Com\Tecnick\Pdf\Font\Stack as ObjFont;
-use Com\Tecnick\Pdf\Graph\Draw as ObjGraph;
-use Com\Tecnick\Pdf\Image\Import as ObjImage;
 
 /**
  * Com\Tecnick\Pdf\Tcpdf
@@ -39,6 +35,8 @@ use Com\Tecnick\Pdf\Image\Import as ObjImage;
  *
  * @phpstan-import-type StyleDataOpt from \Com\Tecnick\Pdf\Graph\Base
  * @phpstan-import-type PageData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type PageInputData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type TFontMetric from \Com\Tecnick\Pdf\Font\Stack
  *
  * @phpstan-import-type TAnnotOpts from Output
  * @phpstan-import-type TSignature from Output
@@ -229,6 +227,9 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
         return $this;
     }
 
+    // ===| BARCODE |=======================================================
+
+
     /**
      * Get a barcode PDF code.
      *
@@ -278,6 +279,8 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
 
         return $out . $this->graph->getStopTransform();
     }
+
+    // ===| ANNOTATION |====================================================
 
     /**
      * Add an annotation and returns the object id.
@@ -371,7 +374,7 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
      * @param float      $posy   Ordinate of upper-left corner.
      * @param float      $width  Width.
      * @param float      $height Height.
-     * @param string     $link   URL to open when the link is clicked or an identifier returned by setInternalLink().
+     * @param string     $link   URL to open when the link is clicked or an identifier returned by addInternalLink().
      *                           A single character prefix may be used to specify the link action:
      *                           - '#' = internal destination
      *                           - '%' = embedded PDF file
@@ -405,11 +408,11 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
      * @return string Internal link identifier to be used with setLink().
      *
      */
-    public function addInternalLink(int $page = 0, float $posy = 0): string
+    public function addInternalLink(int $page = -1, float $posy = 0): string
     {
         $lnkid = '@' . (count($this->links) + 1);
         $this->links[$lnkid] = [
-            'p' => ($page < 1) ? $this->page->getPage()['pid'] : $page,
+            'p' => ($page < 0) ? $this->page->getPageID() : $page,
             'y' => $posy,
         ];
         return $lnkid;
@@ -427,17 +430,70 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
      */
     public function setNamedDestination(
         string $name,
-        int $page = 0,
+        int $page = -1,
         float $posx = 0,
         float $posy = 0,
     ): string {
         $ename = $this->encrypt->encodeNameObject($name);
         $this->dests[$ename] = [
-            'p' => ($page < 1) ? $this->page->getPage()['pid'] : $page,
+            'p' => ($page < 0) ? $this->page->getPageID() : $page,
             'x' => $posx,
             'y' => $posy,
         ];
         return '#' . $ename;
+    }
+
+    /**
+     * Add a bookmark entry.
+     *
+     * @param string $name   Bookmark description that will be printed in the TOC.
+     * @param string $link   (Optional) URL to open when the link is clicked
+     *                       or an identifier returned by addInternalLink().
+     *                       A single character prefix may be used to specify the link action:
+     *                       - '#' = internal destination
+     *                       - '%' = embedded PDF file
+     *                       - '*' = embedded generic file
+     * @param int    $level  Bookmark level (minimum 0).
+     *
+     * @param int    $page   Page number.
+     * @param float  $posx   Abscissa of upper-left corner.
+     * @param float  $posy   Ordinate of upper-left corner.
+     * @param string $fstyle Font style.
+     *                       Possible values are (case insensitive):
+     *                       - regular (default)
+     *                       - B: bold
+     *                       - I: italic
+     *                       - U: underline
+     *                       - D: strikeout (linethrough)
+     *                       - O: overline
+     * @param string $color Color name.
+     */
+    public function setBookmark(
+        string $name,
+        string $link = '',
+        int $level = 0,
+        int $page = -1,
+        float $posx = 0,
+        float $posy = 0,
+        string $fstyle = '',
+        string $color = '',
+    ): void {
+        $maxlevel = ((count($this->outlines) > 0) ? (end($this->outlines)['l'] + 1) : 0);
+        $this->outlines[] = [
+            't' => $name,
+            'u' => $link,
+            'l' => (($level < 0) ? 0 : ($level > $maxlevel ? $maxlevel : $level)),
+            'p' => (($page < 0) ? $this->page->getPageID() : $page),
+            'x' => $posx,
+            'y' => $posy,
+            's' => strtoupper($fstyle),
+            'c' => $color,
+            'parent' => 0,
+            'first' => -1,
+            'last' => -1,
+            'next' => -1,
+            'prev' => -1,
+        ];
     }
 
     // ===| SIGNATURE |=====================================================
@@ -596,7 +652,7 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
     ): array {
         $sigapp = [];
 
-        $sigapp['page'] = ($page < 1) ? $this->page->getPage()['pid'] : $page;
+        $sigapp['page'] = ($page < 0) ? $this->page->getPageID() : $page;
         $sigapp['name'] = (empty($name)) ? 'Signature' : $name;
 
         $pntx = $this->toPoints($posx);
@@ -990,5 +1046,192 @@ class Tcpdf extends \Com\Tecnick\Pdf\ClassObjects
     public function closeLayer(): string
     {
         return 'EMC' . "\n";
+    }
+
+    // ===| TOC |===========================================================
+
+    /**
+     * Add a Table of Contents (TOC) to the document.
+     * The bookmars are created via the setBookmark() method.
+     *
+     * @param int   $page  Page number.
+     * @param float $posx  Abscissa of the upper-left corner.
+     * @param float $posy  Ordinate of the upper-left corner.
+     * @param float $width Width of the signature area.
+     * @param bool  $rtl   Right-To-Left - If true prints the TOC in RTL mode.
+     * @param StyleDataOpt $linestyle Line style for the space filler.
+     *
+     * @return void
+     */
+    public function addTOC(
+        int $page = -1,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        bool $rtl = false,
+        array $linestyle = [
+            'lineWidth' => 0.3,
+            'lineCap' => 'butt',
+            'lineJoin' => 'miter',
+            'dashArray' => [1,1],
+            'dashPhase' => 0,
+            'lineColor' => 'gray',
+            'fillColor' => '',
+        ],
+    ): void {
+        if (empty($width) || $width < 0) {
+            $width = $this->page->getRegion()['RW'];
+        }
+
+        $curfont = $this->font->getCurrentFont();
+
+        // width to accomodate the number (max 9 digits space).
+        $chrw = $this->toUnit($curfont['cw'][48] ?? $curfont['dw']); // 48 ASCII = '0'.
+        $indent = 2 * $chrw; // each level is indented by 2 characters.
+        $numwidth = 9 * $chrw; // maximum 9 digits to print the page number.
+        $txtwidth = ($width - $numwidth);
+
+        $cellSpaceT = $this->toUnit(
+            $this->defcell['margin']['T'] +
+            $this->defcell['padding']['T']
+        );
+        $cellSpaceB = $this->toUnit(
+            $this->defcell['margin']['B'] +
+            $this->defcell['padding']['B']
+        );
+        $cellSpaceH = $chrw + $this->toUnit(
+            $this->defcell['margin']['L'] +
+            $this->defcell['margin']['L'] +
+            $this->defcell['padding']['R'] +
+            $this->defcell['padding']['R']
+        );
+
+        $aligntext = 'L';
+        $alignnum = 'R';
+        $txt_posx = $posx;
+        $num_posx = $posx + $txtwidth;
+        if ($rtl) {
+            $aligntext = 'R';
+            $alignnum = 'L';
+            $txt_posx = $posx + $numwidth;
+            $num_posx = $posx;
+        }
+
+        $pid = ($page < 0) ? $this->page->getPageID() : $page;
+
+        foreach ($this->outlines as $bmrk) {
+            $font = $this->font->cloneFont(
+                $this->pon,
+                $curfont['idx'],
+                $bmrk['s'] . (($bmrk['l'] == 0) ? 'B' : ''),
+                (int) round($curfont['size'] - $bmrk['l']),
+                $curfont['spacing'],
+                $curfont['stretching'],
+            );
+
+            $region = $this->page->getRegion($pid);
+
+            if (($posy + $cellSpaceT + $cellSpaceB + $font['height']) > $region['RH']) {
+                $this->page->getNextRegion($pid);
+                $curpid = $this->page->getPageId();
+                if ($curpid > $pid) {
+                    $pid = $curpid;
+                    $this->setPageContext($pid);
+                }
+                $region = $this->page->getRegion($pid);
+                $posy = 0; // $region['RY'];
+            }
+
+            $this->page->addContent($this->graph->getStartTransform(), $pid);
+            $this->page->addContent($font['out'], $pid);
+
+            if (! empty($bmrk['c'])) {
+                $col = $this->color->getPdfColor($bmrk['c']);
+                $this->page->addContent($col, $pid);
+            }
+
+            if (empty($bmrk['u'])) {
+                $bmrk['u'] = $this->addInternalLink($bmrk['p'], $bmrk['y']);
+            }
+
+            $offset = ($indent * $bmrk['l']);
+            // add bookmark text
+            $this->addTextCell(
+                $bmrk['t'],
+                $pid,
+                $txt_posx,
+                $posy,
+                $txtwidth,
+                0,
+                $offset,
+                0,
+                'T',
+                $aligntext,
+            );
+
+            $bbox = $this->getLastBBox();
+            $wtxt = $bbox['w'];
+
+            $pageid = $this->page->getPageID();
+            if ($pageid > $pid) {
+                $this->page->addContent($this->graph->getStopTransform(), $pid);
+                $lnkid = $this->setLink(
+                    $posx,
+                    $posy,
+                    $width,
+                    ($region['RH'] - $posy),
+                    $bmrk['u'],
+                );
+                $this->page->addAnnotRef($lnkid, $pid);
+                $pid = $pageid;
+                $this->page->addContent($this->graph->getStartTransform(), $pid);
+                $this->page->addContent($font['out'], $pid);
+            }
+
+            $posy = $bbox['y'] - $cellSpaceT; // align number with the last line of the text
+
+            // add page number
+            $this->addTextCell(
+                (string) ($bmrk['p'] + 1),
+                $pid,
+                $num_posx,
+                $posy,
+                $numwidth,
+                0,
+                0,
+                0,
+                'T',
+                $alignnum,
+            );
+
+            $bbox = $this->getLastBBox();
+            $wnum = $bbox['w'];
+
+            // add line to fill the gap between text and number
+            $line_posx = ($cellSpaceH + $offset + $posx + ($rtl ? $wnum : $wtxt));
+            $line_posy = $bbox['y'] + $this->toUnit($font['ascent']);
+            $line = $this->graph->getLine(
+                $line_posx,
+                $line_posy,
+                $line_posx + ($width - $wtxt - $wnum - (2 * $cellSpaceH) - $offset),
+                $line_posy,
+                $linestyle,
+            );
+            $this->page->addContent($line, $pid);
+
+            $lnkid = $this->setLink(
+                $posx,
+                $bbox['y'],
+                $width,
+                $bbox['h'],
+                $bmrk['u'],
+            );
+            $this->page->addAnnotRef($lnkid, $pid);
+
+            $this->page->addContent($this->graph->getStopTransform(), $pid);
+
+            // Move to the next line.
+            $posy = $bbox['y'] + $bbox['h'] + $cellSpaceB;
+        }
     }
 }
