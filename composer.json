@@ -18,18 +18,10 @@
       "role": "lead"
     }
   ],
-  "name":  "mjohndus/my-barcode",
-  "repositories": [
-    {
-      "type": "vcs",
-      "url": "https://github.com/mjohndus/tc-lib-barcode.git"
-    }
-  ],
   "require": {
     "php": ">=8.0",
     "ext-date": "*",
     "ext-pcre": "*",
-    "mjohndus/tc-lib-barcode.git": "dev-mjohndus",
     "tecnickcom/tc-lib-color": "^2.2",
     "tecnickcom/tc-lib-pdf-image": "^2.1",
     "tecnickcom/tc-lib-pdf-font": "^2.6",
