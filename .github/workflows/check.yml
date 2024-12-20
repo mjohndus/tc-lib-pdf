@@ -28,8 +28,6 @@ jobs:
                 os: [ubuntu-latest]
                 coverage-extension: [pcov]
         steps:
-            env:
-            GH_TOKEN: ${{ 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 }}
             - uses: actions/checkout@v4
             #- name: Install pdfinfo
             #  run: sudo apt-get install -y poppler-utils
