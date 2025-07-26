@@ -42,9 +42,9 @@ $pdf = new \Com\Tecnick\Pdf\Tcpdf(
 
 $pdf->setCreator('tc-lib-pdf');
 $pdf->setAuthor('John Doe');
-$pdf->setSubject('tc-lib-pdf example');
+$pdf->setSubject('tc-lib-pdf generic example');
 $pdf->setTitle('Example');
-$pdf->setKeywords('TCPDF tc-lib-pdf example');
+$pdf->setKeywords('TCPDF tc-lib-pdf generic example');
 $pdf->setPDFFilename('test_index.pdf');
 
 $pdf->setViewerPreferences(['DisplayDocTitle' => true]);
@@ -57,7 +57,7 @@ $pdf->enableDefaultPageContent();
 $bfont1 = $pdf->font->insert($pdf->pon, 'helvetica', '', 12);
 
 
-// test imaegs directory
+// test images directory
 $imgdir = realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-image/test/images/');
 
 
@@ -1086,6 +1086,7 @@ $txt2 = $pdf->getTextLine(
     false,
     false,
     '',
+    'S',
     [
         'xoffset' => 0.5,
         'yoffset' => 0.5,
