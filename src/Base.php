@@ -180,7 +180,7 @@ abstract class Base
     /**
      * TCPDF version.
      */
-    protected string $version = '8.3.1';
+    protected string $version = '8.4.1';
 
     /**
      * Time is seconds since EPOCH when the document was created.
@@ -256,6 +256,15 @@ abstract class Base
     protected bool $rtl = false;
 
     /**
+     * Boolean flag to set temporary document language direction.
+     *    False = LTR = Left-To-Right.
+     *    True = RTL = Right-To-Left.
+     *
+     * @val bool
+     */
+    protected bool $tmprtl = false;
+
+    /**
      * Document ID.
      */
     protected string $fileid;
@@ -293,6 +302,20 @@ abstract class Base
         'x-large' => 4.0,
         'xx-large' => 6.0,
     ];
+
+    /**
+     * Ration for small font.
+     *
+     * @var float
+     */
+    protected const FONT_SMALL_RATIO = 2 / 3;
+
+    /**
+     * Default monospaced font.
+     *
+     * @var string
+     */
+    protected const FONT_MONO = 'courier';
 
     /**
      * Default eference values for unit conversion.
@@ -571,10 +594,10 @@ abstract class Base
      * @var TStackBBox
      */
     protected array $bbox = [[
-        'x' => 0,
-        'y' => 0,
-        'w' => 0,
-        'h' => 0,
+        'x' => 0.0,
+        'y' => 0.0,
+        'w' => 0.0,
+        'h' => 0.0,
     ]];
 
     /**
@@ -614,10 +637,10 @@ abstract class Base
      * @const TCellBound
      */
     public const ZEROCELLBOUND = [
-        'T' => 0,
-        'R' => 0,
-        'B' => 0,
-        'L' => 0,
+        'T' => 0.0,
+        'R' => 0.0,
+        'B' => 0.0,
+        'L' => 0.0,
     ];
 
     /**
@@ -786,5 +809,36 @@ abstract class Base
         }
 
         return $this->getUnitValuePoints($val, $ref, $defunit);
+    }
+
+    /**
+     * Set the default document language direction.
+     *
+     * @param bool $enabled False = LTR = Left-To-Right; True = RTL = Right-To-Left.
+     */
+    public function setRTL(bool $enabled): static
+    {
+        $this->rtl = $enabled;
+        return $this;
+    }
+
+    /**
+     * Force temporary RTL language direction.
+     *
+     * @param string $mode 'L' = 'LTR' = Left-To-Right; 'R' = 'RTL' = Right-To-Left.
+     */
+    protected function setTmpRTL(string $mode): void
+    {
+        $this->tmprtl = (!empty($mode) && (strtoupper($mode[0]) == 'R'));
+    }
+
+    /**
+     * Return the current temporary RTL status.
+     *
+     * @return bool
+     */
+    protected function isRTL(): bool
+    {
+        return ($this->rtl || $this->tmprtl);
     }
 }
