@@ -16,6 +16,19 @@
 
 namespace Test;
 
+class TestableTcpdf extends \Com\Tecnick\Pdf\Tcpdf
+{
+    public function exposeEnableSignatureApproval(bool $enabled = true): static
+    {
+        return $this->enableSignatureApproval($enabled);
+    }
+
+    public function exposeSetSignAnnotRefs(): void
+    {
+        $this->setSignAnnotRefs();
+    }
+}
+
 /**
  * Tcpdf Pdf class test
  *
@@ -42,6 +55,22 @@ class TcpdfTest extends TestUtil
                 $prop = $ref->getProperty($name);
                 $prop->setAccessible(true);
                 return $prop->getValue($obj);
+            }
+            $ref = $ref->getParentClass();
+        }
+
+        $this->fail('Property not found: ' . $name);
+    }
+
+    private function setObjectProperty(object $obj, string $name, mixed $value): void
+    {
+        $ref = new \ReflectionClass($obj);
+        while ($ref !== false) {
+            if ($ref->hasProperty($name)) {
+                $prop = $ref->getProperty($name);
+                $prop->setAccessible(true);
+                $prop->setValue($obj, $value);
+                return;
             }
             $ref = $ref->getParentClass();
         }
@@ -274,5 +303,160 @@ class TcpdfTest extends TestUtil
     {
         $obj = $this->getTestObject();
         $this->assertSame("EMC\n", $obj->closeLayer());
+    }
+
+    public function testNewLayerFallsBackToAutoNameAndAddsDesignIntent(): void
+    {
+        $obj = $this->getTestObject();
+        $out = $obj->newLayer('***', ['design' => true], true, true, true);
+
+        /** @var array<int, array{name: string, intent: string}> $layers */
+        $layers = $this->getObjectProperty($obj, 'pdflayer');
+        $this->assertSame(" /OC /LYR001 BDC\n", $out);
+        $this->assertCount(1, $layers);
+        $this->assertSame('LYR001', $layers[0]['name']);
+        $this->assertSame('/Design', $layers[0]['intent']);
+    }
+
+    public function testConstructorPdfaModesSetExpectedFlags(): void
+    {
+        $pdfa1u = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, 'pdfa1u');
+        $this->assertSame(1, $this->getObjectProperty($pdfa1u, 'pdfa'));
+        $this->assertSame('B', $this->getObjectProperty($pdfa1u, 'pdfaConformance'));
+
+        $pdfa2u = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, 'pdfa2u');
+        $this->assertSame(2, $this->getObjectProperty($pdfa2u, 'pdfa'));
+        $this->assertSame('U', $this->getObjectProperty($pdfa2u, 'pdfaConformance'));
+
+        $pdfx = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, 'pdfx');
+        $this->assertTrue($this->getObjectProperty($pdfx, 'pdfx'));
+    }
+
+    public function testConstructorWithUnicodeDisabledSetsAsciiWhitespacePattern(): void
+    {
+        $obj = new \Com\Tecnick\Pdf\Tcpdf('mm', false, false, true);
+
+        /** @var array{r: string} $regexp */
+        $regexp = $this->getObjectProperty($obj, 'spaceregexp');
+        $this->assertSame('/[^\S\xa0]/', $regexp['r']);
+    }
+
+    public function testSetSignatureSetsDefaultPrivkeyAndSignFlag(): void
+    {
+        $obj = $this->getTestObject();
+        $page = $this->initFontAndAddRawPage($obj);
+
+        $obj->setSignature([
+            'appearance' => [
+                'empty' => [
+                    [
+                        'objid' => 321,
+                        'name' => 'EmptySig',
+                        'page' => $page['pid'],
+                        'rect' => '0 0 1 1',
+                    ],
+                ],
+                'name' => 'MainSig',
+                'page' => $page['pid'],
+                'rect' => '0 0 10 5',
+            ],
+            'approval' => '',
+            'cert_type' => 2,
+            'extracerts' => '',
+            'info' => ['ContactInfo' => '', 'Location' => '', 'Name' => '', 'Reason' => ''],
+            'password' => '',
+            'privkey' => '',
+            'signcert' => 'dummy-signcert',
+        ]);
+
+        /** @var array{privkey: string, signcert: string} $signature */
+        $signature = $this->getObjectProperty($obj, 'signature');
+        $this->assertSame('dummy-signcert', $signature['privkey']);
+        $this->assertTrue($this->getObjectProperty($obj, 'sign'));
+    }
+
+    public function testSetSignAnnotRefsReturnsWhenNoEmptySignaturesAreDefined(): void
+    {
+        $obj = new TestableTcpdf();
+        $page = $this->initFontAndAddRawPage($obj);
+
+        $this->setObjectProperty($obj, 'objid', ['signature' => 123]);
+        $this->setObjectProperty($obj, 'signature', [
+            'appearance' => [
+                'empty' => [],
+                'name' => 'MainSig',
+                'page' => $page['pid'],
+                'rect' => '0 0 10 10',
+            ],
+            'approval' => false,
+            'cert_type' => 0,
+            'extracerts' => '',
+            'info' => ['ContactInfo' => '', 'Location' => '', 'Name' => '', 'Reason' => ''],
+            'password' => '',
+            'privkey' => '',
+            'signcert' => '',
+        ]);
+
+        $obj->exposeSetSignAnnotRefs();
+
+        /** @var array{appearance: array{empty: array<int, mixed>, page: int}} $signature */
+        $signature = $this->getObjectProperty($obj, 'signature');
+        $this->assertSame([], $signature['appearance']['empty']);
+        $this->assertSame($page['pid'], $signature['appearance']['page']);
+    }
+
+    public function testSetSignatureAppearanceAddsMainSignatureAnnotationReference(): void
+    {
+        $obj = new TestableTcpdf();
+        $this->initFontAndAddRawPage($obj);
+        $page = $this->initFontAndAddRawPage($obj);
+
+        $this->setObjectProperty($obj, 'objid', ['signature' => 321]);
+        $obj->setSignatureAppearance(1, 2, 3, 4, $page['pid'], 'MainSig');
+
+        /** @var array{appearance: array{page: int, name: string}} $signature */
+        $signature = $this->getObjectProperty($obj, 'signature');
+        $this->assertSame($page['pid'], $signature['appearance']['page']);
+        $this->assertSame('MainSig', $signature['appearance']['name']);
+    }
+
+    public function testEnableSignatureApprovalTogglesFlag(): void
+    {
+        $obj = new TestableTcpdf();
+
+        $ret = $obj->exposeEnableSignatureApproval(true);
+        $this->assertSame($obj, $ret);
+        $this->assertTrue($this->getObjectProperty($obj, 'sigapp'));
+
+        $obj->exposeEnableSignatureApproval(false);
+        $this->assertFalse($this->getObjectProperty($obj, 'sigapp'));
+    }
+
+    public function testAddTOCSupportsRtlPositioningAndBookmarkColor(): void
+    {
+        $obj = $this->getTestObject();
+        $page = $this->initFontAndAddRawPage($obj);
+        $obj->setBookmark('RTL entry', '', 0, $page['pid'], 0, 0, '', 'red');
+
+        $obj->addTOC($page['pid'], 0, 0, -1, true);
+
+        /** @var array<int, array{t: string}> $outlines */
+        $outlines = $this->getObjectProperty($obj, 'outlines');
+        $this->assertCount(1, $outlines);
+        $this->assertSame('RTL entry', $outlines[0]['t']);
+    }
+
+    public function testAddTOCHandlesRegionOverflowAndPageTransitions(): void
+    {
+        $obj = $this->getTestObject();
+        $page = $this->initFontAndAddRawPage($obj);
+        $obj->setBookmark(\str_repeat('Long TOC line ', 250), '', 0, $page['pid']);
+
+        $obj->addTOC($page['pid'], 0, 10000, 20, false);
+
+        /** @var array<int, array{t: string}> $outlines */
+        $outlines = $this->getObjectProperty($obj, 'outlines');
+        $this->assertCount(1, $outlines);
+        $this->assertStringStartsWith('Long TOC line', $outlines[0]['t']);
     }
 }

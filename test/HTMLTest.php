@@ -328,6 +328,168 @@ class HTMLTest extends TestUtil
         $this->assertStringContainsString('U', $dom[1]['fontstyle']);
     }
 
+    public function testParseHTMLAttributesCoversFontTableAndHeadingBranches(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+        $dom = [
+            0 => $this->makeHtmlNode(['fontsize' => 10.0, 'fontstyle' => '']),
+            1 => $this->makeHtmlNode([
+                'value' => 'font',
+                'parent' => 0,
+                'attribute' => ['face' => 'helvetica', 'size' => '+2'],
+                'style' => [],
+                'fontstyle' => '',
+                'fontsize' => 10.0,
+            ]),
+            2 => $this->makeHtmlNode([
+                'value' => 'table',
+                'parent' => 0,
+                'attribute' => [],
+                'style' => [],
+            ]),
+            3 => $this->makeHtmlNode([
+                'value' => 'tr',
+                'parent' => 2,
+                'attribute' => [],
+                'style' => [],
+            ]),
+            4 => $this->makeHtmlNode([
+                'value' => 'td',
+                'parent' => 3,
+                'attribute' => ['colspan' => '2'],
+                'style' => [],
+            ]),
+            5 => $this->makeHtmlNode([
+                'value' => 'h2',
+                'parent' => 0,
+                'attribute' => [],
+                'style' => [],
+                'fontstyle' => '',
+                'fontsize' => 10.0,
+            ]),
+            6 => $this->makeHtmlNode([
+                'value' => 'ul',
+                'parent' => 0,
+                'attribute' => [],
+                'style' => [],
+                'align' => '',
+            ]),
+            7 => $this->makeHtmlNode([
+                'value' => 'small',
+                'parent' => 0,
+                'attribute' => [],
+                'style' => [],
+                'fontsize' => 10.0,
+            ]),
+        ];
+
+        $obj->parseHTMLAttributes($dom, 1, false);
+        $obj->parseHTMLAttributes($dom, 2, false);
+        $obj->parseHTMLAttributes($dom, 3, false);
+        $obj->parseHTMLAttributes($dom, 4, false);
+        $obj->parseHTMLAttributes($dom, 5, false);
+        $obj->parseHTMLAttributes($dom, 6, false);
+        $obj->parseHTMLAttributes($dom, 7, false);
+
+        $this->assertSame(12.0, $dom[1]['fontsize']);
+        $this->assertSame(1, $dom[2]['rows']);
+        $this->assertSame([3], $dom[2]['trids']);
+        $this->assertSame(2, $dom[3]['cols']);
+        $this->assertSame('2', $dom[4]['attribute']['colspan']);
+        $this->assertSame(14.0, $dom[5]['fontsize']);
+        $this->assertStringContainsString('B', $dom[5]['fontstyle']);
+        $this->assertSame('L', $dom[6]['align']);
+        $this->assertGreaterThan(0.0, $dom[7]['fontsize']);
+        $this->assertLessThan(10.0, $dom[7]['fontsize']);
+    }
+
+    public function testParseHTMLStyleAttributesCoversPageBreakAndInheritanceModes(): void
+    {
+        $obj = $this->getTestObject();
+        $dom = [
+            0 => $this->makeHtmlNode([
+                'line-height' => 1.25,
+                'listtype' => 'disc',
+                'text-indent' => 2.0,
+            ]),
+            1 => $this->makeHtmlNode([
+                'parent' => 0,
+                'fontsize' => 10.0,
+                'font-stretch' => 100.0,
+                'letter-spacing' => 0.0,
+                'attribute' => [
+                    'style' => 'line-height:normal;page-break-before:always;page-break-after:right;list-style-type:inherit;text-indent:inherit;',
+                ],
+            ]),
+            2 => $this->makeHtmlNode([
+                'parent' => 0,
+                'fontsize' => 10.0,
+                'font-stretch' => 100.0,
+                'letter-spacing' => 0.0,
+                'attribute' => [
+                    'style' => 'line-height:normal;page-break-before:left;page-break-after:always;',
+                ],
+            ]),
+        ];
+
+        $obj->parseHTMLStyleAttributes($dom, 1, 0);
+        $obj->parseHTMLStyleAttributes($dom, 2, 0);
+
+        $this->assertSame(1.25, $dom[1]['line-height']);
+        $this->assertSame('right', $dom[1]['attribute']['pagebreakafter']);
+        $this->assertSame('disc', $dom[1]['listtype']);
+        $this->assertSame(2.0, $dom[1]['text-indent']);
+
+        $this->assertSame(1.25, $dom[2]['line-height']);
+        $this->assertArrayHasKey('pagebreakafter', $dom[2]['attribute']);
+        $this->assertSame('true', $dom[2]['attribute']['pagebreakafter']);
+    }
+
+    public function testParseHTMLAttributesCoversDisplayColorAndGeometryAttributes(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+        $dom = [
+            0 => $this->makeHtmlNode(['fontsize' => 10.0, 'fontstyle' => '']),
+            1 => $this->makeHtmlNode([
+                'value' => 'span',
+                'parent' => 0,
+                'fontsize' => 10.0,
+                'attribute' => [
+                    'display' => 'none',
+                    'dir' => 'rtl',
+                    'color' => 'red',
+                    'bgcolor' => '#00ff00',
+                    'strokecolor' => 'blue',
+                    'width' => '20',
+                    'height' => '10',
+                    'align' => 'center',
+                    'stroke' => '0.2',
+                    'fill' => 'true',
+                    'clip' => 'true',
+                    'border' => '1',
+                ],
+                'style' => [],
+            ]),
+        ];
+
+        $obj->parseHTMLAttributes($dom, 1, false);
+
+        $this->assertTrue($dom[1]['hide']);
+        $this->assertSame('rtl', $dom[1]['dir']);
+        $this->assertStringContainsString('rgba(', $dom[1]['fgcolor']);
+        $this->assertNotSame('', $dom[1]['bgcolor']);
+        $this->assertStringContainsString('rgba(', $dom[1]['strokecolor']);
+        $this->assertGreaterThan(0.0, $dom[1]['width']);
+        $this->assertGreaterThan(0.0, $dom[1]['height']);
+        $this->assertSame('C', $dom[1]['align']);
+        $this->assertGreaterThan(0.0, $dom[1]['stroke']);
+        $this->assertTrue($dom[1]['fill']);
+        $this->assertTrue($dom[1]['clip']);
+        $this->assertArrayHasKey('LTRB', $dom[1]['border']);
+    }
+
     public function testGetHTMLCellReturnsWithoutHanging(): void
     {
         $obj = $this->getTestObject();
@@ -347,6 +509,34 @@ class HTMLTest extends TestUtil
         $this->assertStringNotContainsString('<head', $out);
         $this->assertStringNotContainsString('<style', $out);
         $this->assertStringContainsString('<p>', $out);
+    }
+
+    public function testSanitizeHTMLNormalizesSelectTextareaAndImgBlocks(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $html = '<select><option value="v1">Alpha</option><option>Beta</option></select>'
+            . '<textarea>x"y' . "\n" . 'z</textarea><img src="a.png"> tail';
+
+        $out = $obj->exposeSanitizeHTML($html);
+
+        $this->assertStringContainsString('<select opt="v1#!TaB!#Alpha#!NwL!#Beta" />', $out);
+        $this->assertStringContainsString('<textarea value="x\'\'y', $out);
+        $this->assertStringContainsString('z" />', $out);
+        $this->assertStringContainsString('<img src="a.png"><span><marker style="font-size:0"/></span>', $out);
+    }
+
+    public function testSanitizeHTMLPreservesPreNewlinesAndSpaces(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $html = '<pre>line1' . "\n" . ' line2</pre>';
+
+        $out = $obj->exposeSanitizeHTML($html);
+
+        $this->assertStringContainsString('<pre>', $out);
+        $this->assertStringContainsString('line1', $out);
+        $this->assertStringContainsString('&nbsp;', $out);
+        $this->assertStringContainsString('line2', $out);
+        $this->assertStringContainsString('</pre>', $out);
     }
 
     public function testGetHTMLRootPropertiesIncludesExpectedDefaults(): void
@@ -374,6 +564,33 @@ class HTMLTest extends TestUtil
         $this->assertGreaterThanOrEqual(2, \count($dom));
     }
 
+    public function testProcessHTMLDOMClosingTagStoresTableHeadAndNoBrAttribute(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $root = $obj->exposeGetHTMLRootProperties();
+        /** @var THTMLAttrib $root */
+        $root = $root;
+        $dom = [
+            0 => \array_replace($root, ['value' => 'table', 'elkey' => 0, 'parent' => 0, 'thead' => '']),
+            1 => \array_replace($root, [
+                'value' => 'tr',
+                'elkey' => 1,
+                'parent' => 0,
+                'thead' => 'true',
+                'attribute' => [],
+            ]),
+            2 => \array_replace($root, ['value' => 'tr', 'elkey' => 2, 'parent' => 1]),
+        ];
+        $elm = ['<table>', '<tr>', '</tr>'];
+
+        $obj->exposeProcessHTMLDOMClosingTag($dom, $elm, 2, 1, '<cssarray>x</cssarray>');
+
+        $this->assertSame('true', $dom[1]['attribute']['nobr']);
+        $this->assertStringContainsString('<cssarray>x</cssarray><table>', $dom[0]['thead']);
+    }
+
     public function testGetHTMLliBulletReturnsEmptyForCaretType(): void
     {
         $obj = $this->getInternalTestObject();
@@ -381,6 +598,35 @@ class HTMLTest extends TestUtil
         $out = $obj->exposeGetHTMLliBullet(1, 1, 0, 0, '^');
 
         $this->assertSame('', $out);
+    }
+
+    public function testGetHTMLliBulletSupportsDefaultUnorderedAndOrderedTypes(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $defaultUnordered = $obj->exposeGetHTMLliBullet(1, 1, 0, 0, '!');
+        $defaultOrdered = $obj->exposeGetHTMLliBullet(2, 12, 0, 0, '#');
+
+        $this->assertNotSame('', $defaultUnordered);
+        $this->assertNotSame('', $defaultOrdered);
+        $this->assertNotSame($defaultUnordered, $defaultOrdered);
+    }
+
+    public function testGetHTMLliBulletSupportsOrderedFormatVariants(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $decimalLeadingZero = $obj->exposeGetHTMLliBullet(1, 7, 0, 0, 'decimal-leading-zero');
+        $upperRoman = $obj->exposeGetHTMLliBullet(1, 7, 0, 0, 'upper-roman');
+        $upperAlpha = $obj->exposeGetHTMLliBullet(1, 7, 0, 0, 'upper-alpha');
+
+        $this->assertNotSame('', $decimalLeadingZero);
+        $this->assertNotSame('', $upperRoman);
+        $this->assertNotSame('', $upperAlpha);
+        $this->assertNotSame($decimalLeadingZero, $upperRoman);
+        $this->assertNotSame($upperRoman, $upperAlpha);
     }
 
     public function testPageBreakReturnsCurrentOrNextPageId(): void
@@ -407,6 +653,129 @@ class HTMLTest extends TestUtil
         $obj->exposeProcessHTMLDOMText($dom, 'a&amp;b', 1, 0);
 
         $this->assertSame('a&b', $dom[1]['value']);
+    }
+
+    public function testGetHTMLDOMCSSDataSkipsInheritedAndInvalidSelectors(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $dom = [
+            0 => $this->makeHtmlNode(['value' => 'root', 'csssel' => [' p.x']]),
+            1 => $this->makeHtmlNode([
+                'value' => 'p',
+                'parent' => 0,
+                'attribute' => ['class' => 'x'],
+            ]),
+        ];
+        $css = [
+            '0010 p.x' => 'color:red;',
+            'badselector' => 'color:blue;',
+        ];
+
+        $obj->getHTMLDOMCSSData($dom, $css, 1);
+
+        $this->assertEmpty($dom[1]['cssdata']);
+    }
+
+    public function testIsValidCSSSelectorForTagCoversAttributeOperatorsAndCombinators(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $dom = [
+            0 => $this->makeHtmlNode(['value' => 'root', 'tag' => true, 'opening' => true]),
+            1 => $this->makeHtmlNode([
+                'value' => 'div',
+                'parent' => 0,
+                'tag' => true,
+                'opening' => true,
+                'attribute' => ['id' => 'main', 'class' => 'container'],
+            ]),
+            2 => $this->makeHtmlNode([
+                'value' => 'p',
+                'parent' => 1,
+                'tag' => true,
+                'opening' => true,
+                'attribute' => ['class' => 'sib'],
+            ]),
+            3 => $this->makeHtmlNode([
+                'value' => 'span',
+                'parent' => 1,
+                'tag' => true,
+                'opening' => true,
+                'attribute' => [
+                    'class' => 'x y',
+                    'id' => 'node',
+                    'words' => 'foo bar',
+                    'data' => 'prefix-mid-suffix',
+                    'lang' => 'en-us',
+                ],
+            ]),
+        ];
+
+        $this->assertTrue($obj->isValidCSSSelectorForTag($dom, 3, ' span.x'));
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[words~=foo]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[data^=prefix]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[data$=suffix]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[data*=mid]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[lang|=en]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' span[id=node]');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' div > span.x');
+        $obj->isValidCSSSelectorForTag($dom, 3, ' p + span.x');
+        $this->assertFalse($obj->isValidCSSSelectorForTag($dom, 3, ' p ~ span.x'));
+        $this->assertFalse($obj->isValidCSSSelectorForTag($dom, 3, ' span:hover'));
+        $this->assertFalse($obj->isValidCSSSelectorForTag($dom, 3, '['));
+    }
+
+    public function testParseHTMLStyleAttributesCoversExtendedCssBranches(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $dom = [
+            0 => $this->makeHtmlNode([
+                'line-height' => 1.2,
+                'fontsize' => 10.0,
+                'listtype' => 'disc',
+                'font-stretch' => 100.0,
+                'letter-spacing' => 0.0,
+                'text-indent' => 2.0,
+            ]),
+            1 => $this->makeHtmlNode([
+                'parent' => 0,
+                'value' => 'a',
+                'fontsize' => 10.0,
+                'fontstyle' => 'B',
+                'attribute' => [
+                    'style' => 'direction:rtl;display:none;font-family:helvetica;list-style-type:inherit;'
+                        . 'text-indent:3mm;text-transform:capitalize;font-size:12;font-stretch:120;'
+                        . 'letter-spacing:0.2;line-height:2;font-weight:normal;font-style:italic;'
+                        . 'color:red;background-color:#00ff00;text-decoration:underline line-through overline;'
+                        . 'width:20;height:10;text-align:right;padding:1 2 3 4;margin:1 2 3 4;'
+                        . 'border:1 solid black;border-color:red green blue black;border-width:1 2 3 4;'
+                        . 'border-style:solid dashed dotted double;padding-left:1;padding-right:2;'
+                        . 'padding-top:3;padding-bottom:4;margin-left:auto;margin-right:2;'
+                        . 'margin-top:1;margin-bottom:3;border-left:1 solid #111;border-right:2 dashed #222;'
+                        . 'border-top:3 dotted #333;border-bottom:4 double #444;border-spacing:2;'
+                        . 'page-break-inside:avoid;page-break-before:left;page-break-after:right;',
+                ],
+            ]),
+        ];
+
+        $obj->parseHTMLStyleAttributes($dom, 1, 0);
+
+        $this->assertSame('rtl', $dom[1]['dir']);
+        $this->assertTrue($dom[1]['hide']);
+        $this->assertSame('disc', $dom[1]['listtype']);
+        $this->assertNotSame('', $dom[1]['text-transform']);
+        $this->assertGreaterThan(0.0, $dom[1]['fontsize']);
+        $this->assertGreaterThan(0.0, $dom[1]['line-height']);
+        $this->assertNotSame('', $dom[1]['fgcolor']);
+        $this->assertNotSame('', $dom[1]['bgcolor']);
+        $this->assertSame('R', $dom[1]['align']);
+        $this->assertSame('true', $dom[1]['attribute']['nobr']);
+        $this->assertSame('left', $dom[1]['attribute']['pagebreak']);
+        $this->assertSame('right', $dom[1]['attribute']['pagebreakafter']);
+        $this->assertNotSame(['T' => 0.0, 'R' => 0.0, 'B' => 0.0, 'L' => 0.0], $dom[1]['padding']);
+        $this->assertNotSame(['T' => 0.0, 'R' => 0.0, 'B' => 0.0, 'L' => 0.0], $dom[1]['margin']);
+        $this->assertNotEmpty($dom[1]['border']);
     }
 
     public function testInheritHTMLPropertiesMergesParentDefaults(): void
@@ -477,5 +846,16 @@ class HTMLTest extends TestUtil
         $out = $obj->exposeParseHTMLText($elm, $tpx, $tpy, $tpw, $tph);
 
         $this->assertSame('', $out);
+    }
+
+    public function testGetHTMLliBulletNoneAndCustomImageTypeBranches(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $this->assertSame('', $obj->exposeGetHTMLliBullet(1, 1, 0, 0, 'none'));
+
+        $this->expectException(\Throwable::class);
+        $obj->exposeGetHTMLliBullet(1, 1, 0, 0, 'img|png|4|4|missing.png');
     }
 }

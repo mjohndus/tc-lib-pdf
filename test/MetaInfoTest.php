@@ -79,6 +79,20 @@ class TestablMetaInfo extends \Com\Tecnick\Pdf\Tcpdf
     }
 }
 
+class TestableObjPageForMetaInfo extends \Com\Tecnick\Pdf\Page\Page
+{
+    /**
+     * @var array<string, string>
+     */
+    public array $CropBox = [
+        'MediaBox' => 'MediaBox',
+    ];
+
+    public function __construct()
+    {
+    }
+}
+
 class MetaInfoTest extends TestUtil
 {
     protected function getTestObject(): \Com\Tecnick\Pdf\Tcpdf
@@ -120,6 +134,21 @@ class MetaInfoTest extends TestUtil
         }
 
         $this->fail('Property not found: ' . $name);
+    }
+
+    private function initFontAndPage(\Com\Tecnick\Pdf\Tcpdf $obj): void
+    {
+        if (!\defined('K_PATH_FONTS')) {
+            $fonts = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts');
+            \define('K_PATH_FONTS', $fonts);
+        }
+        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
+        $font = $this->getObjectProperty($obj, 'font');
+        /** @var int $pon */
+        $pon = $this->getObjectProperty($obj, 'pon');
+        $fontfile = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/core/helvetica.json');
+        $font->insert($pon, 'helvetica', '', 10, null, null, $fontfile);
+        $obj->addPage();
     }
 
     public function testGetVersionReturnsNonEmptyString(): void
@@ -173,6 +202,30 @@ class MetaInfoTest extends TestUtil
 
         $obj->setPDFVersion('1.9');
         $this->assertSame('1.4', $this->getObjectProperty($obj, 'pdfver'));
+    }
+
+    public function testSetPDFVersionHonorsPdfa2AndPdfa4Modes(): void
+    {
+        $obj = $this->getTestObject();
+        $pdfa = new \ReflectionProperty(\Com\Tecnick\Pdf\Tcpdf::class, 'pdfa');
+        $pdfa->setAccessible(true);
+
+        $pdfa->setValue($obj, 2);
+        $obj->setPDFVersion('1.5');
+        $this->assertSame('1.7', $this->getObjectProperty($obj, 'pdfver'));
+
+        $pdfa->setValue($obj, 4);
+        $obj->setPDFVersion('1.5');
+        $this->assertSame('2.0', $this->getObjectProperty($obj, 'pdfver'));
+    }
+
+    public function testSetPDFVersionThrowsOnInvalidFormat(): void
+    {
+        $obj = $this->getTestObject();
+        $this->expectException(\Com\Tecnick\Pdf\Exception::class);
+        $this->expectExceptionMessage('Invalid PDF version format');
+
+        $obj->setPDFVersion('1.A');
     }
 
     public function testSetSRGBTogglesFlag(): void
@@ -258,6 +311,17 @@ class MetaInfoTest extends TestUtil
         $this->assertStringContainsString('/Duplex /DuplexFlipShortEdge', $result);
     }
 
+    public function testGetPageBoxNameReturnsMappedValueWhenAvailable(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->setObjectProperty($obj, 'page', new TestableObjPageForMetaInfo());
+        $this->setObjectProperty($obj, 'viewerpref', ['ViewArea' => 'MediaBox']);
+
+        $result = $obj->exposeGetPageBoxName('ViewArea');
+
+        $this->assertSame(' /ViewArea /MediaBox', $result);
+    }
+
     public function testGetBooleanModeReturnsEmptyWhenNotSet(): void
     {
         $obj = $this->getInternalTestObject();
@@ -324,6 +388,16 @@ class MetaInfoTest extends TestUtil
         $this->assertStringContainsString('D:', $result);
     }
 
+    public function testGetOutDateTimeStringUsesDocumentTimeWhenInputIsZero(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->setObjectProperty($obj, 'doctime', 1710001234);
+
+        $result = $obj->exposeGetOutDateTimeString(0, 1);
+
+        $this->assertStringContainsString('D:', $result);
+    }
+
     public function testGetEscapedXMLEscapesSpecialChars(): void
     {
         $obj = $this->getInternalTestObject();
@@ -355,6 +429,18 @@ class MetaInfoTest extends TestUtil
         $this->assertStringContainsString('endobj', $result);
     }
 
+    public function testGetOutXMPIncludesPdfaBlockWhenPdfaEnabled(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->setObjectProperty($obj, 'pdfa', 3);
+        $this->setObjectProperty($obj, 'pdfaConformance', 'U');
+
+        $result = $obj->exposeGetOutXMP();
+
+        $this->assertStringContainsString('<pdfaid:part>3</pdfaid:part>', $result);
+        $this->assertStringContainsString('<pdfaid:conformance>U</pdfaid:conformance>', $result);
+    }
+
     public function testGetOutViewerPrefIncludesDirectionAndKnownFlags(): void
     {
         $obj = $this->getInternalTestObject();
@@ -366,6 +452,30 @@ class MetaInfoTest extends TestUtil
         $this->assertStringContainsString('/ViewerPreferences <<', $result);
         $this->assertStringContainsString('/Direction /R2L', $result);
         $this->assertStringContainsString('/HideToolbar true', $result);
+        $this->assertStringContainsString('/NumCopies 2', $result);
+    }
+
+    public function testGetOutViewerPrefIncludesPageRangeAndDisplayMode(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+        $obj->setViewerPreferences([
+            'NonFullScreenPageMode' => 'UseOutlines',
+            'PrintPageRange' => [1, 3],
+            'NumCopies' => 2,
+            'PrintScaling' => 'none',
+            'PickTrayByPDFSize' => false,
+            'ViewArea' => 'MediaBox',
+            'ViewClip' => 'CropBox',
+            'PrintArea' => 'TrimBox',
+            'PrintClip' => 'BleedBox',
+        ]);
+
+        $result = $obj->exposeGetOutViewerPref();
+
+        $this->assertStringContainsString('/NonFullScreenPageMode /UseOutlines', $result);
+        $this->assertStringContainsString('/PrintPageRange [ 0 2 ]', $result);
+        $this->assertStringContainsString('/PrintScaling /None', $result);
         $this->assertStringContainsString('/NumCopies 2', $result);
     }
 }

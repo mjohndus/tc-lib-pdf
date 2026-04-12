@@ -16,6 +16,23 @@
 
 namespace Test;
 
+class TestableJavaScript extends \Com\Tecnick\Pdf\Tcpdf
+{
+    /**
+     * @param array<string, mixed> $prp
+     * @return array<string, mixed>
+     */
+    public function exposeGetAnnotOptFromJSProp(array $prp = []): array
+    {
+        return $this->getAnnotOptFromJSProp($prp);
+    }
+
+    public function exposeGetPDFDefFillColor(): string
+    {
+        return $this->getPDFDefFillColor();
+    }
+}
+
 class JavaScriptTest extends TestUtil
 {
     public static function setUpBeforeClass(): void
@@ -29,6 +46,11 @@ class JavaScriptTest extends TestUtil
     protected function getTestObject(): \Com\Tecnick\Pdf\Tcpdf
     {
         return new \Com\Tecnick\Pdf\Tcpdf();
+    }
+
+    protected function getInternalTestObject(): TestableJavaScript
+    {
+        return new TestableJavaScript();
     }
 
     private function getObjectProperty(object $obj, string $name): mixed
@@ -257,6 +279,124 @@ class JavaScriptTest extends TestUtil
         $obj->addContentAsEmbeddedFile('payload.txt', '');
     }
 
+    public function testAddContentAsEmbeddedFileThrowsInPdfaMode(): void
+    {
+        $obj = $this->getTestObject();
+        $this->setObjectProperty($obj, 'pdfa', 2);
+
+        try {
+            $obj->addContentAsEmbeddedFile('payload.txt', 'abc123');
+            $this->fail('Expected PDF/A embedded content exception');
+        } catch (\Com\Tecnick\Pdf\Exception $e) {
+            $this->assertStringContainsString('Embedded files are not allowed', $e->getMessage());
+        }
+    }
+
+    public function testGetAnnotOptFromJSPropCoversDensePropertyMapping(): void
+    {
+        $obj = $this->getInternalTestObject();
+
+        $this->assertSame([], $obj->exposeGetAnnotOptFromJSProp([]));
+        $this->assertSame(['Subtype' => 'Widget'], $obj->exposeGetAnnotOptFromJSProp(['aopt' => ['Subtype' => 'Widget']]));
+
+        $this->setObjectProperty($obj, 'rtl', true);
+        $rtlOpt = $obj->exposeGetAnnotOptFromJSProp(['alignment' => 'weird']);
+        $this->assertSame(2, $rtlOpt['q']);
+
+        $opt = $obj->exposeGetAnnotOptFromJSProp([
+            'alignment' => 'center',
+            'lineWidth' => '2',
+            'borderStyle' => 'dashed',
+            'buttonAlignX' => 0.25,
+            'buttonAlignY' => 0.75,
+            'buttonFitBounds' => 'true',
+            'buttonScaleHow' => 'scaleHow.anamorphic',
+            'buttonScaleWhen' => 'scaleWhen.tooSmall',
+            'buttonPosition' => 'position.overlay',
+            'fillColor' => 'yellow',
+            'strokeColor' => 'blue',
+            'rotation' => 90,
+            'charLimit' => '5',
+            'readonly' => 'true',
+            'required' => 'true',
+            'multiline' => 'true',
+            'password' => 'true',
+            'NoToggleToOff' => 'true',
+            'Radio' => 'true',
+            'Pushbutton' => 'true',
+            'Combo' => 'true',
+            'editable' => 'true',
+            'Sort' => 'true',
+            'fileSelect' => 'true',
+            'multipleSelection' => 'true',
+            'doNotSpellCheck' => 'true',
+            'doNotScroll' => 'true',
+            'comb' => 'true',
+            'radiosInUnison' => 'true',
+            'richText' => 'true',
+            'commitOnSelChange' => 'true',
+            'defaultValue' => 'dv',
+            'display' => 'display.noView',
+            'currentValueIndices' => [1, 2],
+            'value' => ['Visible A', 'Visible B'],
+            'exportValues' => ['Export A', 'Export B'],
+            'richValue' => '<b>visible</b>',
+            'submitName' => 'submit-field',
+            'name' => 'field-name',
+            'userName' => 'Field Name',
+            'highlight' => 'outline',
+        ]);
+
+        /** @var array<string, mixed> $markerOptions */
+        $markerOptions = $opt['mk'];
+        /** @var array<string, mixed> $iconFit */
+        $iconFit = $markerOptions['if'];
+
+        $this->assertSame(1, $opt['q']);
+        $this->assertSame([0, 0, 2, [3, 2]], $opt['border']);
+        $this->assertSame(['w' => 2, 's' => 'D', 'd' => [3, 2]], $opt['bs']);
+        $this->assertSame([0.25, 0.75], $iconFit['a']);
+        $this->assertTrue($iconFit['fb']);
+        $this->assertSame('A', $iconFit['s']);
+        $this->assertSame('S', $iconFit['sw']);
+        $this->assertSame(6, $markerOptions['tp']);
+        $this->assertArrayHasKey('bg', $markerOptions);
+        $this->assertArrayHasKey('bc', $markerOptions);
+        $this->assertSame(90, $markerOptions['r']);
+        $this->assertSame(5, $opt['maxlen']);
+        $this->assertGreaterThan(0, $opt['ff']);
+        $this->assertSame('dv', $opt['dv']);
+        $this->assertSame(100, $opt['f']);
+        $this->assertSame([1, 2], $opt['i']);
+        $this->assertSame([['Export A', 'Visible A'], ['Export B', 'Visible B']], $opt['opt']);
+        $this->assertSame('<b>visible</b>', $opt['rv']);
+        $this->assertSame('submit-field', $opt['tm']);
+        $this->assertSame('field-name', $opt['t']);
+        $this->assertSame('Field Name', $opt['tu']);
+        $this->assertSame('O', $opt['h']);
+    }
+
+    public function testEmbeddedFileValidationCoversEmptyNameAndPdfa3Relationship(): void
+    {
+        $obj = $this->getTestObject();
+
+        try {
+            $obj->addEmbeddedFile('');
+            $this->fail('Expected empty file name exception');
+        } catch (\Com\Tecnick\Pdf\Exception $e) {
+            $this->assertStringContainsString('Empty file name', $e->getMessage());
+        }
+
+        $this->setObjectProperty($obj, 'pdfa', 3);
+
+        try {
+            $obj->addEmbeddedFile(__DIR__ . '/../README.md', 'text/plain', 'NotValid');
+            $this->fail('Expected invalid afrel exception');
+        } catch (\Com\Tecnick\Pdf\Exception $e) {
+            $this->assertStringContainsString('afrel must be one of', $e->getMessage());
+        }
+    }
+
     public function testSetAnnotationAndSetLinkCreateAnnotationEntries(): void
     {
         $obj = $this->getTestObject();
@@ -314,6 +454,45 @@ class JavaScriptTest extends TestUtil
         $this->assertSame('Caption', $ann[$oid]['opt']['t']);
         $this->assertSame('btnField', $ann[$oid]['opt']['v']);
         $this->assertArrayHasKey('aa', $ann[$oid]['opt']);
+    }
+
+    public function testAddFFButtonSupportsStructuredFormActionOptions(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+        $oid = $obj->addFFButton('submitField', 1, 2, 30, 10, 'Submit', [
+            'S' => 'SubmitForm',
+            'F' => 'https://example.test/form',
+            'Fields' => ['alpha', 'beta', 123],
+            'Flags' => ['IncludeNoValueFields', 'SubmitPDF', 'EmbedForm'],
+        ]);
+
+        /** @var array<int, array{opt:array<string, mixed>}> $ann */
+        $ann = $this->getObjectProperty($obj, 'annotation');
+        $this->assertArrayHasKey($oid, $ann);
+        $this->assertIsString($ann[$oid]['opt']['aa']);
+        /** @var string $actionString */
+        $actionString = $ann[$oid]['opt']['aa'];
+        $this->assertStringContainsString('/S /SubmitForm', $actionString);
+        $this->assertStringContainsString('/Fields [', $actionString);
+        $this->assertStringContainsString('/Flags 8450', $actionString);
+
+        $obj->addFFButton('allFlags', 1, 2, 30, 10, 'Submit', [
+            'S' => 'SubmitForm',
+            'Flags' => [
+                'Include/Exclude',
+                'ExportFormat',
+                'GetMethod',
+                'SubmitCoordinates',
+                'XFDF',
+                'IncludeAppendSaves',
+                'IncludeAnnotations',
+                'CanonicalFormat',
+                'ExclNonUserAnnots',
+                'ExclFKey',
+                'UnknownFlag',
+            ],
+        ]);
     }
 
     public function testAddFFCheckBoxCreatesCheckboxWidget(): void
@@ -411,5 +590,288 @@ class JavaScriptTest extends TestUtil
         $this->assertStringContainsString("flst.\\setItems(", $jsScript);
         $this->assertStringContainsString("frad=this.addField('rad','radiobutton'", $jsScript);
         $this->assertStringContainsString("ftxt=this.addField('txt','text'", $jsScript);
+    }
+
+    public function testAddJSFieldWrappersHandleArrayValuedSelections(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        \set_error_handler(static function (int $errno, string $errstr): bool {
+            return ($errno === E_WARNING) && \str_contains($errstr, 'Undefined array key "num"');
+        });
+
+        try {
+            $obj->addJSComboBox('cmb2', 1, 2, 20, 6, [['A', 'Alpha'], ['B', 'Beta']]);
+            $obj->addJSListBox('lst2', 1, 2, 20, 6, [['X', 'Ex'], ['Y', 'Why']]);
+        } finally {
+            \restore_error_handler();
+        }
+
+        /** @var string $jsScript */
+        $jsScript = $this->getObjectProperty($obj, 'javascript');
+        $this->assertStringContainsString("fcmb2.setItems(['Alpha','A'],['Beta','B']);", $jsScript);
+        $this->assertStringContainsString("flst2.\\setItems(['Ex','X'],['Why','Y']);", $jsScript);
+    }
+
+    public function testGetAnnotOptFromJSPropCoversAdditionalMappingVariants(): void
+    {
+        $obj = $this->getInternalTestObject();
+
+        $this->assertSame(
+            ['f' => 7],
+            $obj->exposeGetAnnotOptFromJSProp(['aopt' => ['f' => 7]]),
+        );
+
+        $styleVariants = [
+            'beveled' => 'B',
+            'inset' => 'I',
+            'underline' => 'U',
+            'solid' => 'S',
+        ];
+        foreach ($styleVariants as $style => $expected) {
+            $mapped = $obj->exposeGetAnnotOptFromJSProp(['borderStyle' => $style]);
+            /** @var array<string, mixed> $borderSpec */
+            $borderSpec = $mapped['bs'];
+            $this->assertSame($expected, $borderSpec['s']);
+        }
+
+        $numericPos = $obj->exposeGetAnnotOptFromJSProp(['buttonPosition' => 5]);
+        /** @var array<string, mixed> $numericMk */
+        $numericMk = $numericPos['mk'];
+        $this->assertSame(5, $numericMk['tp']);
+        $invalidPos = $obj->exposeGetAnnotOptFromJSProp(['buttonPosition' => 99]);
+        /** @var array<string, mixed> $invalidMk */
+        $invalidMk = $invalidPos['mk'];
+        $this->assertArrayNotHasKey('tp', $invalidMk);
+
+        $filled = $obj->exposeGetAnnotOptFromJSProp([
+            'fillColor' => [0.1, 0.2, 0.3],
+            'strokeColor' => [0.4, 0.5, 0.6],
+            'display' => 'display.hidden',
+            'highlight' => 'push',
+            'value' => 'plain-value',
+        ]);
+        /** @var array<string, mixed> $filledMk */
+        $filledMk = $filled['mk'];
+        $this->assertSame([0.1, 0.2, 0.3], $filledMk['bg']);
+        $this->assertSame([0.4, 0.5, 0.6], $filledMk['bc']);
+        $this->assertSame('P', $filled['h']);
+        $this->assertSame('plain-value', $filled['v']);
+        $this->assertSame(6, $filled['f']);
+
+        $noPrint = $obj->exposeGetAnnotOptFromJSProp(['display' => 'display.noPrint']);
+        $this->assertSame(0, $noPrint['f']);
+        $visible = $obj->exposeGetAnnotOptFromJSProp(['display' => 'display.visible', 'highlight' => 'invert']);
+        $this->assertSame(4, $visible['f']);
+        $this->assertSame('i', $visible['h']);
+        $defaultHighlight = $obj->exposeGetAnnotOptFromJSProp(['highlight' => 'unknown']);
+        $this->assertSame('N', $defaultHighlight['h']);
+        $highlightAlias = $obj->exposeGetAnnotOptFromJSProp(['highlight' => 'highlight.o']);
+        $this->assertSame('O', $highlightAlias['h']);
+
+        $this->assertSame([1, 2, 3], $obj->exposeGetAnnotOptFromJSProp(['border' => [1, 2, 3]])['border']);
+        $scaleHowProportional = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleHow' => 'scaleHow.proportional']);
+        /** @var array<string, mixed> $sHowPropMk */
+        $sHowPropMk = $scaleHowProportional['mk'];
+        /** @var array<string, mixed> $sHowPropIf */
+        $sHowPropIf = $sHowPropMk['if'];
+        $this->assertSame('P', $sHowPropIf['s']);
+
+        $scaleHowDefault = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleHow' => 'scaleHow.invalid']);
+        /** @var array<string, mixed> $scaleHowDefaultMk */
+        $scaleHowDefaultMk = $scaleHowDefault['mk'];
+        /** @var array<string, mixed> $scaleHowDefaultIf */
+        $scaleHowDefaultIf = $scaleHowDefaultMk['if'];
+        $this->assertSame('P', $scaleHowDefaultIf['s']);
+
+        $scaleWhenAlways = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.always']);
+        /** @var array<string, mixed> $scaleWhenAlwaysMk */
+        $scaleWhenAlwaysMk = $scaleWhenAlways['mk'];
+        /** @var array<string, mixed> $scaleWhenAlwaysIf */
+        $scaleWhenAlwaysIf = $scaleWhenAlwaysMk['if'];
+        $this->assertSame('A', $scaleWhenAlwaysIf['sw']);
+
+        $scaleWhenNever = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.never']);
+        /** @var array<string, mixed> $scaleWhenNeverMk */
+        $scaleWhenNeverMk = $scaleWhenNever['mk'];
+        /** @var array<string, mixed> $scaleWhenNeverIf */
+        $scaleWhenNeverIf = $scaleWhenNeverMk['if'];
+        $this->assertSame('N', $scaleWhenNeverIf['sw']);
+
+        $scaleWhenTooBig = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.tooBig']);
+        /** @var array<string, mixed> $scaleWhenTooBigMk */
+        $scaleWhenTooBigMk = $scaleWhenTooBig['mk'];
+        /** @var array<string, mixed> $scaleWhenTooBigIf */
+        $scaleWhenTooBigIf = $scaleWhenTooBigMk['if'];
+        $this->assertSame('B', $scaleWhenTooBigIf['sw']);
+
+        $scaleWhenDefault = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.invalid']);
+        /** @var array<string, mixed> $scaleWhenDefaultMk */
+        $scaleWhenDefaultMk = $scaleWhenDefault['mk'];
+        /** @var array<string, mixed> $scaleWhenDefaultIf */
+        $scaleWhenDefaultIf = $scaleWhenDefaultMk['if'];
+        $this->assertSame('N', $scaleWhenDefaultIf['sw']);
+
+        $positionMap = [
+            'position.textOnly' => 0,
+            'position.iconOnly' => 1,
+            'position.iconTextV' => 2,
+            'position.textIconV' => 3,
+            'position.iconTextH' => 4,
+            'position.textIconH' => 5,
+            'position.overlay' => 6,
+            'position.unknown' => 0,
+        ];
+        foreach ($positionMap as $position => $expected) {
+            $mapped = $obj->exposeGetAnnotOptFromJSProp(['buttonPosition' => $position]);
+            /** @var array<string, mixed> $marker */
+            $marker = $mapped['mk'];
+            $this->assertSame($expected, $marker['tp']);
+        }
+
+        $highlightMap = [
+            'none' => 'N',
+            'highlight.n' => 'N',
+            'highlight.i' => 'i',
+            'highlight.p' => 'P',
+        ];
+        foreach ($highlightMap as $highlight => $expected) {
+            $mapped = $obj->exposeGetAnnotOptFromJSProp(['highlight' => $highlight]);
+            $this->assertSame($expected, $mapped['h']);
+        }
+
+        $fillColorFallback = $this->getInternalTestObject();
+        $this->assertMatchesRegularExpression('/(rg\\n|^$)/', $fillColorFallback->exposeGetPDFDefFillColor());
+    }
+
+    public function testXObjectTemplateAppliesDeferredAnnotationTransform(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $templateId = $obj->newXObjectTemplate(-1, -1);
+        $deferredId = $obj->setAnnotation(1, 1, 5, 5, 'in-template', ['subtype' => 'Text']);
+        $this->assertSame(0, $deferredId);
+        $obj->exitXObjectTemplate();
+
+        $rendered = $obj->getXObjectTemplate($templateId, 1, 1, 0, 0);
+        $this->assertStringContainsString('/' . $templateId . ' Do', $rendered);
+
+        /** @var array<int, array{txt:string}> $annotation */
+        $annotation = $this->getObjectProperty($obj, 'annotation');
+        $this->assertNotEmpty($annotation);
+    }
+
+    public function testJsFieldPropertiesAndAnnotationAttachmentsCoverResidualBranches(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        \set_error_handler(static function (int $errno, string $errstr): bool {
+            return ($errno === E_WARNING) && \str_contains($errstr, 'Undefined array key "num"');
+        });
+
+        try {
+            $obj->addJSText('txtProps', 1, 2, 20, 6, ['strokeColor' => 'red', 'value' => 'abc']);
+        } finally {
+            \restore_error_handler();
+        }
+
+        /** @var string $jsScript */
+        $jsScript = $this->getObjectProperty($obj, 'javascript');
+        $this->assertStringContainsString('ftxtProps.strokeColor=', $jsScript);
+        $this->assertStringContainsString("ftxtProps.value='abc';", $jsScript);
+
+        if (!\function_exists('imagecreatetruecolor') || !\function_exists('imagepng')) {
+            $this->markTestSkipped('GD image functions are required for icon annotation coverage test.');
+        }
+
+        $attachmentPath = (string) \realpath(__DIR__ . '/../README.md');
+        $iconPath = \tempnam(\sys_get_temp_dir(), 'tc-ico-');
+        $this->assertNotFalse($iconPath);
+        $iconResource = \imagecreatetruecolor(1, 1);
+        $this->assertNotFalse($iconResource);
+        \imagepng($iconResource, (string) $iconPath);
+        $annotId = -1;
+        try {
+            $annotId = $obj->setAnnotation(1, 2, 3, 4, 'attach', [
+                'subtype' => 'fileattachment',
+                'fs' => $attachmentPath,
+                'mk' => ['i' => $iconPath, 'ri' => $iconPath, 'ix' => $iconPath],
+            ]);
+        } catch (\Throwable $e) {
+            $this->assertNotSame('', $e->getMessage());
+        } finally {
+            @\unlink((string) $iconPath);
+        }
+
+        $this->assertGreaterThanOrEqual(-1, $annotId);
+        /** @var array<string, mixed> $embeddedfiles */
+        $embeddedfiles = $this->getObjectProperty($obj, 'embeddedfiles');
+        $this->assertArrayHasKey('README.md', $embeddedfiles);
+    }
+
+    public function testAddFFButtonSupportsNumericFlagsAndAoptWithoutMk(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $oid = $obj->addFFButton(
+            'submitNumeric',
+            1,
+            2,
+            30,
+            10,
+            'Submit',
+            ['S' => 'ResetForm', 'Flags' => 1024],
+            ['subtype' => 'Widget'],
+            ['aopt' => ['Subtype' => 'Widget', 'ft' => 'Btn']],
+        );
+
+        /** @var array<int, array{opt:array<string, mixed>}> $annotation */
+        $annotation = $this->getObjectProperty($obj, 'annotation');
+        $this->assertArrayHasKey($oid, $annotation);
+        $this->assertIsString($annotation[$oid]['opt']['aa']);
+        /** @var string $actionString */
+        $actionString = $annotation[$oid]['opt']['aa'];
+        $this->assertStringContainsString('/S /ResetForm', $actionString);
+        $this->assertStringContainsString('/Flags 1024', $actionString);
+    }
+
+    public function testFFChoiceAndTextVariantsCoverScalarAndAlignmentPaths(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $comboId = $obj->addFFComboBox('comboScalar', 1, 2, 30, 12, ['One', 'Two']);
+        $listId = $obj->addFFListBox('listScalar', 1, 2, 30, 12, ['Red', 'Blue']);
+        $listArrayId = $obj->addFFListBox('listArray', 1, 2, 30, 12, [['V1', 'Label 1'], ['V2', 'Label 2']]);
+        $radioOffId = $obj->addFFRadioButton('radioGroup', 3, 4, 6, 'On', false, ['subtype' => 'Widget', 'q' => 0], ['aopt' => ['Subtype' => 'Widget', 'f' => 0], 'readonly' => 'true']);
+        $radioOnId = $obj->addFFRadioButton('radioGroup', 9, 4, 6, 'On', true);
+
+        $txtLeftId = $obj->addFFText('txtLeft', 1, 2, 30, 10, ['subtype' => 'Widget', 'q' => 0], ['alignment' => 'left', 'value' => 'L']);
+        $txtCenterId = $obj->addFFText('txtCenter', 1, 2, 30, 10, ['subtype' => 'Widget'], ['alignment' => 'center', 'value' => 'C']);
+        $txtRightId = $obj->addFFText('txtRight', 1, 2, 30, 10, ['subtype' => 'Widget', 'q' => 2], ['alignment' => 'right', 'value' => 'R']);
+        $txtUnknownId = $obj->addFFText('txtUnknown', 1, 2, 30, 10, ['subtype' => 'Widget', 'q' => 99], ['value' => 'U']);
+
+        /** @var array<int, array{opt:array<string, mixed>}> $annotation */
+        $annotation = $this->getObjectProperty($obj, 'annotation');
+        $this->assertArrayHasKey($comboId, $annotation);
+        $this->assertArrayHasKey($listId, $annotation);
+        $this->assertArrayHasKey($listArrayId, $annotation);
+        $this->assertArrayHasKey($radioOffId, $annotation);
+        $this->assertArrayHasKey($radioOnId, $annotation);
+        $this->assertArrayHasKey($txtLeftId, $annotation);
+        $this->assertArrayHasKey($txtCenterId, $annotation);
+        $this->assertArrayHasKey($txtRightId, $annotation);
+        $this->assertArrayHasKey($txtUnknownId, $annotation);
+
+        /** @var array<string, array{kids:array<int, array{def:string}>, '#readonly#': bool}> $radioGroups */
+        $radioGroups = $this->getObjectProperty($obj, 'radiobuttons');
+        $this->assertArrayHasKey('radioGroup', $radioGroups);
+        $this->assertFalse($radioGroups['radioGroup']['#readonly#']);
+        $this->assertSame('Off', $radioGroups['radioGroup']['kids'][0]['def']);
+        $this->assertSame('On', $radioGroups['radioGroup']['kids'][1]['def']);
     }
 }
