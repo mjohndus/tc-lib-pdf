@@ -37,10 +37,7 @@ class JavaScriptTest extends TestUtil
 {
     public static function setUpBeforeClass(): void
     {
-        if (!\defined('K_PATH_FONTS')) {
-            $fonts = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts');
-            \define('K_PATH_FONTS', $fonts);
-        }
+        self::setUpFontsPath();
     }
 
     protected function getTestObject(): \Com\Tecnick\Pdf\Tcpdf
@@ -53,37 +50,6 @@ class JavaScriptTest extends TestUtil
         return new TestableJavaScript();
     }
 
-    private function getObjectProperty(object $obj, string $name): mixed
-    {
-        $ref = new \ReflectionClass($obj);
-        while ($ref !== false) {
-            if ($ref->hasProperty($name)) {
-                $prop = $ref->getProperty($name);
-                $prop->setAccessible(true);
-                return $prop->getValue($obj);
-            }
-            $ref = $ref->getParentClass();
-        }
-
-        $this->fail('Property not found: ' . $name);
-    }
-
-    private function setObjectProperty(object $obj, string $name, mixed $value): void
-    {
-        $ref = new \ReflectionClass($obj);
-        while ($ref !== false) {
-            if ($ref->hasProperty($name)) {
-                $prop = $ref->getProperty($name);
-                $prop->setAccessible(true);
-                $prop->setValue($obj, $value);
-                return;
-            }
-            $ref = $ref->getParentClass();
-        }
-
-        $this->fail('Property not found: ' . $name);
-    }
-
     /** @return array{pid: int} */
     private function addRawPage(\Com\Tecnick\Pdf\Tcpdf $obj): array
     {
@@ -92,20 +58,6 @@ class JavaScriptTest extends TestUtil
         /** @var array{pid: int} $rawPage */
         $rawPage = $page->add([]);
         return $rawPage;
-    }
-
-    /** @return array{pid: int} */
-    private function initFontAndPage(\Com\Tecnick\Pdf\Tcpdf $obj): array
-    {
-        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
-        $font = $this->getObjectProperty($obj, 'font');
-        /** @var int $pon */
-        $pon = $this->getObjectProperty($obj, 'pon');
-        $fontfile = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/core/helvetica.json');
-        $font->insert($pon, 'helvetica', '', 10, null, null, $fontfile);
-        /** @var array{pid: int} $page */
-        $page = $obj->addPage();
-        return $page;
     }
 
     public function testAppendRawJavaScriptAppendsScript(): void
@@ -671,47 +623,33 @@ class JavaScriptTest extends TestUtil
         $this->assertSame('O', $highlightAlias['h']);
 
         $this->assertSame([1, 2, 3], $obj->exposeGetAnnotOptFromJSProp(['border' => [1, 2, 3]])['border']);
-        $scaleHowProportional = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleHow' => 'scaleHow.proportional']);
-        /** @var array<string, mixed> $sHowPropMk */
-        $sHowPropMk = $scaleHowProportional['mk'];
-        /** @var array<string, mixed> $sHowPropIf */
-        $sHowPropIf = $sHowPropMk['if'];
-        $this->assertSame('P', $sHowPropIf['s']);
+        $scaleHowMap = [
+            'scaleHow.proportional' => 'P',
+            'scaleHow.invalid' => 'P',
+        ];
+        foreach ($scaleHowMap as $scaleHow => $expected) {
+            $mapped = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleHow' => $scaleHow]);
+            /** @var array<string, mixed> $scaleHowMk */
+            $scaleHowMk = $mapped['mk'];
+            /** @var array<string, mixed> $scaleHowIf */
+            $scaleHowIf = $scaleHowMk['if'];
+            $this->assertSame($expected, $scaleHowIf['s']);
+        }
 
-        $scaleHowDefault = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleHow' => 'scaleHow.invalid']);
-        /** @var array<string, mixed> $scaleHowDefaultMk */
-        $scaleHowDefaultMk = $scaleHowDefault['mk'];
-        /** @var array<string, mixed> $scaleHowDefaultIf */
-        $scaleHowDefaultIf = $scaleHowDefaultMk['if'];
-        $this->assertSame('P', $scaleHowDefaultIf['s']);
-
-        $scaleWhenAlways = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.always']);
-        /** @var array<string, mixed> $scaleWhenAlwaysMk */
-        $scaleWhenAlwaysMk = $scaleWhenAlways['mk'];
-        /** @var array<string, mixed> $scaleWhenAlwaysIf */
-        $scaleWhenAlwaysIf = $scaleWhenAlwaysMk['if'];
-        $this->assertSame('A', $scaleWhenAlwaysIf['sw']);
-
-        $scaleWhenNever = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.never']);
-        /** @var array<string, mixed> $scaleWhenNeverMk */
-        $scaleWhenNeverMk = $scaleWhenNever['mk'];
-        /** @var array<string, mixed> $scaleWhenNeverIf */
-        $scaleWhenNeverIf = $scaleWhenNeverMk['if'];
-        $this->assertSame('N', $scaleWhenNeverIf['sw']);
-
-        $scaleWhenTooBig = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.tooBig']);
-        /** @var array<string, mixed> $scaleWhenTooBigMk */
-        $scaleWhenTooBigMk = $scaleWhenTooBig['mk'];
-        /** @var array<string, mixed> $scaleWhenTooBigIf */
-        $scaleWhenTooBigIf = $scaleWhenTooBigMk['if'];
-        $this->assertSame('B', $scaleWhenTooBigIf['sw']);
-
-        $scaleWhenDefault = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => 'scaleWhen.invalid']);
-        /** @var array<string, mixed> $scaleWhenDefaultMk */
-        $scaleWhenDefaultMk = $scaleWhenDefault['mk'];
-        /** @var array<string, mixed> $scaleWhenDefaultIf */
-        $scaleWhenDefaultIf = $scaleWhenDefaultMk['if'];
-        $this->assertSame('N', $scaleWhenDefaultIf['sw']);
+        $scaleWhenMap = [
+            'scaleWhen.always' => 'A',
+            'scaleWhen.never' => 'N',
+            'scaleWhen.tooBig' => 'B',
+            'scaleWhen.invalid' => 'N',
+        ];
+        foreach ($scaleWhenMap as $scaleWhen => $expected) {
+            $mapped = $obj->exposeGetAnnotOptFromJSProp(['buttonScaleWhen' => $scaleWhen]);
+            /** @var array<string, mixed> $scaleWhenMk */
+            $scaleWhenMk = $mapped['mk'];
+            /** @var array<string, mixed> $scaleWhenIf */
+            $scaleWhenIf = $scaleWhenMk['if'];
+            $this->assertSame($expected, $scaleWhenIf['sw']);
+        }
 
         $positionMap = [
             'position.textOnly' => 0,

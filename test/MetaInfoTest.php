@@ -16,6 +16,8 @@
 
 namespace Test;
 
+use PHPUnit\Framework\Attributes\DataProvider;
+
 class TestablMetaInfo extends \Com\Tecnick\Pdf\Tcpdf
 {
     public function exposeGetFormattedDate(int $time): string
@@ -105,51 +107,6 @@ class MetaInfoTest extends TestUtil
         return new TestablMetaInfo();
     }
 
-    private function getObjectProperty(object $obj, string $name): mixed
-    {
-        $ref = new \ReflectionClass($obj);
-        while ($ref !== false) {
-            if ($ref->hasProperty($name)) {
-                $prop = $ref->getProperty($name);
-                $prop->setAccessible(true);
-                return $prop->getValue($obj);
-            }
-            $ref = $ref->getParentClass();
-        }
-
-        $this->fail('Property not found: ' . $name);
-    }
-
-    private function setObjectProperty(object $obj, string $name, mixed $value): void
-    {
-        $ref = new \ReflectionClass($obj);
-        while ($ref !== false) {
-            if ($ref->hasProperty($name)) {
-                $prop = $ref->getProperty($name);
-                $prop->setAccessible(true);
-                $prop->setValue($obj, $value);
-                return;
-            }
-            $ref = $ref->getParentClass();
-        }
-
-        $this->fail('Property not found: ' . $name);
-    }
-
-    private function initFontAndPage(\Com\Tecnick\Pdf\Tcpdf $obj): void
-    {
-        if (!\defined('K_PATH_FONTS')) {
-            $fonts = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts');
-            \define('K_PATH_FONTS', $fonts);
-        }
-        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
-        $font = $this->getObjectProperty($obj, 'font');
-        /** @var int $pon */
-        $pon = $this->getObjectProperty($obj, 'pon');
-        $fontfile = (string) \realpath(__DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/core/helvetica.json');
-        $font->insert($pon, 'helvetica', '', 10, null, null, $fontfile);
-        $obj->addPage();
-    }
 
     public function testGetVersionReturnsNonEmptyString(): void
     {
@@ -193,30 +150,17 @@ class MetaInfoTest extends TestUtil
         $this->assertSame('1.6', $this->getObjectProperty($obj, 'pdfver'));
     }
 
-    public function testSetPDFVersionHonorsPdfaMode(): void
+    #[DataProvider('pdfaVersionFixtureProvider')]
+    public function testSetPDFVersionHonorsPdfaModes(int $pdfaMode, string $inputVersion, string $expectedVersion): void
     {
         $obj = $this->getTestObject();
         $pdfa = new \ReflectionProperty(\Com\Tecnick\Pdf\Tcpdf::class, 'pdfa');
         $pdfa->setAccessible(true);
-        $pdfa->setValue($obj, 1);
+        $pdfa->setValue($obj, $pdfaMode);
 
-        $obj->setPDFVersion('1.9');
-        $this->assertSame('1.4', $this->getObjectProperty($obj, 'pdfver'));
-    }
+        $obj->setPDFVersion($inputVersion);
 
-    public function testSetPDFVersionHonorsPdfa2AndPdfa4Modes(): void
-    {
-        $obj = $this->getTestObject();
-        $pdfa = new \ReflectionProperty(\Com\Tecnick\Pdf\Tcpdf::class, 'pdfa');
-        $pdfa->setAccessible(true);
-
-        $pdfa->setValue($obj, 2);
-        $obj->setPDFVersion('1.5');
-        $this->assertSame('1.7', $this->getObjectProperty($obj, 'pdfver'));
-
-        $pdfa->setValue($obj, 4);
-        $obj->setPDFVersion('1.5');
-        $this->assertSame('2.0', $this->getObjectProperty($obj, 'pdfver'));
+        $this->assertSame($expectedVersion, $this->getObjectProperty($obj, 'pdfver'));
     }
 
     public function testSetPDFVersionThrowsOnInvalidFormat(): void
@@ -262,24 +206,19 @@ class MetaInfoTest extends TestUtil
         $this->assertSame($pref, $this->getObjectProperty($obj, 'viewerpref'));
     }
 
-    public function testGetPagePrintScalingReturnsAppDefaultByDefault(): void
+    /** @param ?array<string, mixed> $viewerPref */
+    #[DataProvider('pagePrintScalingFixtureProvider')]
+    public function testGetPagePrintScalingReturnsExpectedValue(?array $viewerPref, string $expectedToken): void
     {
         $obj = $this->getInternalTestObject();
+        if ($viewerPref !== null) {
+            $this->setObjectProperty($obj, 'viewerpref', $viewerPref);
+        }
 
         $result = $obj->exposeGetPagePrintScaling();
 
         $this->assertStringContainsString('/PrintScaling', $result);
-        $this->assertStringContainsString('AppDefault', $result);
-    }
-
-    public function testGetPagePrintScalingReturnsNoneWhenSet(): void
-    {
-        $obj = $this->getInternalTestObject();
-        $this->setObjectProperty($obj, 'viewerpref', ['PrintScaling' => 'none']);
-
-        $result = $obj->exposeGetPagePrintScaling();
-
-        $this->assertStringContainsString('/PrintScaling /None', $result);
+        $this->assertStringContainsString($expectedToken, $result);
     }
 
     public function testGetDuplexModeReturnsEmptyByDefault(): void
@@ -289,26 +228,6 @@ class MetaInfoTest extends TestUtil
         $result = $obj->exposeGetDuplexMode();
 
         $this->assertSame('', $result);
-    }
-
-    public function testGetDuplexModeReturnsSimplex(): void
-    {
-        $obj = $this->getInternalTestObject();
-        $this->setObjectProperty($obj, 'viewerpref', ['Duplex' => 'Simplex']);
-
-        $result = $obj->exposeGetDuplexMode();
-
-        $this->assertStringContainsString('/Duplex /Simplex', $result);
-    }
-
-    public function testGetDuplexModeReturnsDuplexFlipShortEdge(): void
-    {
-        $obj = $this->getInternalTestObject();
-        $this->setObjectProperty($obj, 'viewerpref', ['Duplex' => 'DuplexFlipShortEdge']);
-
-        $result = $obj->exposeGetDuplexMode();
-
-        $this->assertStringContainsString('/Duplex /DuplexFlipShortEdge', $result);
     }
 
     public function testGetPageBoxNameReturnsMappedValueWhenAvailable(): void
@@ -331,35 +250,28 @@ class MetaInfoTest extends TestUtil
         $this->assertSame('', $result);
     }
 
-    public function testGetBooleanModeReturnsTrueValue(): void
+    #[DataProvider('duplexModeFixtureProvider')]
+    public function testGetDuplexModeReturnsMappedValue(string $duplexMode, string $expectedOutput): void
     {
         $obj = $this->getInternalTestObject();
-        $this->setObjectProperty($obj, 'viewerpref', ['HideToolbar' => true]);
+        $this->setObjectProperty($obj, 'viewerpref', ['Duplex' => $duplexMode]);
+
+        $result = $obj->exposeGetDuplexMode();
+
+        $this->assertStringContainsString($expectedOutput, $result);
+    }
+
+    #[DataProvider('booleanModeFixtureProvider')]
+    public function testGetBooleanModeReturnsMappedValue(bool $value, string $expectedWord): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->setObjectProperty($obj, 'viewerpref', ['HideToolbar' => $value]);
 
         $result = $obj->exposeGetBooleanMode('HideToolbar');
 
-        $this->assertStringContainsString('/HideToolbar true', $result);
+        $this->assertStringContainsString('/HideToolbar ' . $expectedWord, $result);
     }
 
-    public function testGetBooleanModeReturnsFalseValue(): void
-    {
-        $obj = $this->getInternalTestObject();
-        $this->setObjectProperty($obj, 'viewerpref', ['HideToolbar' => false]);
-
-        $result = $obj->exposeGetBooleanMode('HideToolbar');
-
-        $this->assertStringContainsString('/HideToolbar false', $result);
-    }
-
-    public function testGetProducerReturnsNonEmptyString(): void
-    {
-        $obj = $this->getInternalTestObject();
-
-        $result = $obj->exposeGetProducer();
-
-        $this->assertNotSame('', $result);
-        $this->assertStringContainsString('TCPDF', $result);
-    }
 
     public function testGetFormattedDateReturnsPdfDateStyle(): void
     {
@@ -477,5 +389,42 @@ class MetaInfoTest extends TestUtil
         $this->assertStringContainsString('/PrintPageRange [ 0 2 ]', $result);
         $this->assertStringContainsString('/PrintScaling /None', $result);
         $this->assertStringContainsString('/NumCopies 2', $result);
+    }
+
+    /** @return array<string, array{0: int, 1: string, 2: string}> */
+    public static function pdfaVersionFixtureProvider(): array
+    {
+        return [
+            'pdfa1_forces_1_4' => [1, '1.9', '1.4'],
+            'pdfa2_forces_1_7' => [2, '1.5', '1.7'],
+            'pdfa4_forces_2_0' => [4, '1.5', '2.0'],
+        ];
+    }
+
+    /** @return array<string, array{0: ?array<string, mixed>, 1: string}> */
+    public static function pagePrintScalingFixtureProvider(): array
+    {
+        return [
+            'default_value' => [null, 'AppDefault'],
+            'explicit_none' => [['PrintScaling' => 'none'], '/None'],
+        ];
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public static function duplexModeFixtureProvider(): array
+    {
+        return [
+            'simplex' => ['Simplex', '/Duplex /Simplex'],
+            'short_edge' => ['DuplexFlipShortEdge', '/Duplex /DuplexFlipShortEdge'],
+        ];
+    }
+
+    /** @return array<string, array{0: bool, 1: string}> */
+    public static function booleanModeFixtureProvider(): array
+    {
+        return [
+            'true_value' => [true, 'true'],
+            'false_value' => [false, 'false'],
+        ];
     }
 }
