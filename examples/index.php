@@ -1792,6 +1792,7 @@ $pdf->setBookmark('HTML', '', 0, -1, 0, 0, 'B', '');
 
 $pdf->page->addContent($bfont5['out']);
 
+
 $html_01 = '<h1>HTML Example</h1>
 Some special characters: &lt; € &euro; &#8364; &amp; è &egrave; &copy; &gt; \\slash \\\\double-slash \\\\\\triple-slash
 <h2>List</h2>
@@ -1822,7 +1823,26 @@ List example:
 	<dd>Black hot drink</dd>
 	<dt>Milk</dt>
 	<dd>White cold drink</dd>
-</dl>';
+</dl>
+
+<div style="text-align:center">The words &#8220;<span dir="rtl">&#1502;&#1494;&#1500; [mazel] &#1496;&#1493;&#1489; [tov]</span>&#8221; mean &#8220;Congratulations!&#8221;</div>
+
+<p>This is just an example of html code to demonstrate some supported CSS inline styles.
+<span style="font-weight: bold;">bold text</span>
+<span style="text-decoration: line-through;">line-trough</span>
+<span style="text-decoration: underline line-through;">underline and line-trough</span>
+<span style="color: rgb(0, 128, 64);">color</span>
+<span style="background-color: rgb(255, 0, 0); color: rgb(255, 255, 255);">background color</span>
+<span style="font-weight: bold;">bold</span>
+<span style="font-size: xx-small;">xx-small</span>
+<span style="font-size: x-small;">x-small</span>
+<span style="font-size: small;">small</span>
+<span style="font-size: medium;">medium</span>
+<span style="font-size: large;">large</span>
+<span style="font-size: x-large;">x-large</span>
+<span style="font-size: xx-large;">xx-large</span>
+</p>';
+
 
 $pdf->addHTMLCell(
     $html_01, // string $html,
