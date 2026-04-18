@@ -1571,7 +1571,7 @@ $sigdata = [
     'cert_type' => 2,
     // 'extracerts' => null,
     'info' => [
-        'ContactInfo' => 'http://www.tcpdf.org',
+        'ContactInfo' => 'https://tcpdf.org',
         'Location' => 'Office',
         'Name' => 'tc-lib-pdf',
         'Reason' => 'PDF signature test',
@@ -1785,15 +1785,17 @@ $pdf->page->addAnnotRef($lnk2);
 
 // ----------
 
-// HTML
+// HTML A
 
 $pageV01 = $pdf->addPage();
 $pdf->setBookmark('HTML', '', 0, -1, 0, 0, 'B', '');
 
-$pdf->page->addContent($bfont5['out']);
+$bfont6 = $pdf->font->insert($pdf->pon, 'dejavusans', '', 10);
+
+$pdf->page->addContent($bfont6['out']);
 
 
-$html_01 = '<h1>HTML Example</h1>
+$html_01 = '<h1>HTML Example A</h1>
 Some special characters: &lt; € &euro; &#8364; &amp; è &egrave; &copy; &gt; \\slash \\\\double-slash \\\\\\triple-slash
 <h2>List</h2>
 List example:
@@ -1852,6 +1854,202 @@ $pdf->addHTMLCell(
     0, // float $height = 0,
     null, // ?array $cell = null,
     $style_cell, // array $styles = [],
+);
+
+// ----------
+
+// HTML B
+
+$pageV02 = $pdf->addPage();
+
+$pdf->page->addContent($bfont6['out']);
+
+$textcolors = '<h2>Text</h1>';
+$bgcolors = '<h2>Background</h2>';
+
+foreach($pdf->color::WEBHEX as $k => $v) {
+	$textcolors .= '<span color="#'.$v.'">'.$k.'</span> ';
+    $bgcolors .= '<span bgcolor="#'.$v.'" color="#333333">'.$k.'</span> ';
+}
+
+$html_02 = '<h1>HTML Colors</h1>'.$textcolors.'<hr />'.$bgcolors;
+
+$pdf->addHTMLCell(
+    $html_02, // string $html,
+    20, // float $posx = 0,
+    10, // float $posy = 0,
+);
+
+// ----------
+
+// HTML C
+
+$pageV03 = $pdf->addPage();
+
+$pdf->page->addContent($bfont6['out']);
+
+$html_03 = '<h1>Various HTML Tests</h1>
+<font face="courier"><b>thisisaverylongword</b></font> <font face="helvetica"><i>thisisanotherverylongword</i></font> <font face="times"><b>thisisaverylongword</b></font> thisisanotherverylongword <font face="times">thisisaverylongword</font> <font face="courier"><b>thisisaverylongword</b></font> <font face="helvetica"><i>thisisanotherverylongword</i></font> <font face="times"><b>thisisaverylongword</b></font> thisisanotherverylongword <font face="times">thisisaverylongword</font> <font face="courier"><b>thisisaverylongword</b></font> <font face="helvetica"><i>thisisanotherverylongword</i></font> <font face="times"><b>thisisaverylongword</b></font> thisisanotherverylongword <font face="times">thisisaverylongword</font> <font face="courier"><b>thisisaverylongword</b></font> <font face="helvetica"><i>thisisanotherverylongword</i></font> <font face="times"><b>thisisaverylongword</b></font> thisisanotherverylongword <font face="times">thisisaverylongword</font> <font face="courier"><b>thisisaverylongword</b></font> <font face="helvetica"><i>thisisanotherverylongword</i></font> <font face="times"><b>thisisaverylongword</b></font> thisisanotherverylongword <font face="times">thisisaverylongword</font>';
+
+
+
+// Test fonts nesting
+$htmlt1 = 'Default <font face="courier">Courier <font face="helvetica">Helvetica <font face="times">Times <font face="dejavusans">dejavusans </font>Times </font>Helvetica </font>Courier </font>Default';
+$htmlt2 = '<small>small text</small> normal <small>small text</small> normal <sub>subscript</sub> normal <sup>superscript</sup> normal';
+$htmlt3 = '<font size="10" color="#ff7f50">The</font> <font size="10" color="#6495ed">quick</font> <font size="14" color="#dc143c">brown</font> <font size="18" color="#008000">fox</font> <font size="22"><a href="https://tcpdf.org">jumps</a></font> <font size="22" color="#a0522d">over</font> <font size="18" color="#da70d6">the</font> <font size="14" color="#9400d3">lazy</font> <font size="10" color="#4169ef">dog</font>.';
+
+$html_03 .= '<br />'.$htmlt1.'<br />'.$htmlt2.'<br />'.$htmlt3.'<br />'.$htmlt3.'<br />'.$htmlt2;
+
+
+$html_03 .= <<<EOF
+<hr />
+<h2>Div Blocks</h2>
+<div style="background-color:#880000;color:white;">
+Hello World!<br />
+Hello
+</div>
+<pre style="background-color:#336699;color:white;">
+int main() {
+    printf("HelloWorld");
+    return 0;
+}
+</pre>
+<tt>Monospace font</tt>, normal font, <tt>monospace font</tt>, normal font.
+<br />
+<div style="background-color:#880000;color:white;">DIV LEVEL 1<div style="background-color:#008800;color:white;">DIV LEVEL 2</div>DIV LEVEL 1</div>
+<br />
+<span style="background-color:#880000;color:white;">SPAN LEVEL 1 <span style="background-color:#008800;color:white;">SPAN LEVEL 2</span> SPAN LEVEL 1</span>
+
+<h2>Images</h2>
+<div style="text-align:center">left <img src="images/tcpdf_logo.jpg" alt="TCPDF logo" width="89" height="30" border="0" /><img src="images/tcpdf_box.svg" alt="TCPDF box" width="150" height="100" border="0" /> right<br/>center</div>
+EOF;
+
+$pdf->addHTMLCell(
+    $html_03, // string $html,
+    20, // float $posx = 0,
+    10, // float $posy = 0,
+);
+
+// ----------
+
+// HTML D
+
+$pageV04 = $pdf->addPage();
+
+$pdf->page->addContent($bfont6['out']);
+
+$subtable = '<table border="1" cellspacing="6" cellpadding="4"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>';
+
+$html_04 = '<h2>HTML TABLES</h2>
+<table border="1" cellspacing="3" cellpadding="4">
+	<tr>
+		<th align="center">#</th>
+		<th align="right">RIGHT align</th>
+		<th align="left">LEFT align</th>
+		<th>4A</th>
+	</tr>
+	<tr>
+		<td>1</td>
+		<td bgcolor="#cccccc" align="center" colspan="2">A1 ex<i>amp</i>le <a href="https://tcpdf.org">link</a> column span. One two tree four five six seven eight nine ten.<br />line after br<br /><small>small text</small> normal <sub>subscript</sub> normal <sup>superscript</sup> normal  bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla bla<ol><li>first<ol><li>sublist</li><li>sublist</li></ol></li><li>second</li></ol><small color="#FF0000" bgcolor="#FFFF00">small small small small small small small small small small small small small small small small small small small small</small></td>
+		<td>4B</td>
+	</tr>
+	<tr>
+		<td>'.$subtable.'</td>
+		<td bgcolor="#0000FF" color="yellow" align="center">A2 € &euro; &#8364; &amp; è &egrave;<br/>A2 € &euro; &#8364; &amp; è &egrave;</td>
+		<td bgcolor="#FFFF00" align="left"><span color="#FF0000">Red</span> Yellow BG</td>
+		<td>4C</td>
+	</tr>
+	<tr>
+		<td>1A</td>
+		<td rowspan="2" colspan="2" bgcolor="#FFFFCC">2AA<br />2AB<br />2AC</td>
+		<td bgcolor="#FF0000">4D</td>
+	</tr>
+	<tr>
+		<td>1B</td>
+		<td>4E</td>
+	</tr>
+	<tr>
+		<td>1C</td>
+		<td>2C</td>
+		<td>3C</td>
+		<td>4F</td>
+	</tr>
+</table>
+
+<table border="1" cellspacing="3" cellpadding="4">
+	<tr>
+		<td align="left"><span>1L</span> <span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> <span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span> <span>India</span> <span>Juliett</span> <span>Kilo</span> <span>Lima</span> <span>Mike</span> <span>November</span> <span>Oscar</span> <span>Papa</span> <span>Quebec</span> <span>Romeo</span> <span>Sierra</span> <span>Tango</span> <span>Uniform</span> <span>Victor</span> <span>Whiskey</span> <span>Xray</span> <span>Yankee</span> <span>Zulu</span></td>
+	</tr>
+	<tr>
+		<td align="center"><span>1C</span> <span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> <span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span> <span>India</span> <span>Juliett</span> <span>Kilo</span> <span>Lima</span> <span>Mike</span> <span>November</span> <span>Oscar</span> <span>Papa</span> <span>Quebec</span> <span>Romeo</span> <span>Sierra</span> <span>Tango</span> <span>Uniform</span> <span>Victor</span> <span>Whiskey</span> <span>Xray</span> <span>Yankee</span> <span>Zulu</span></td>
+	</tr>
+	<tr>
+		<td align="right"><span>1R</span> <span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> <span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span> <span>India</span> <span>Juliett</span> <span>Kilo</span> <span>Lima</span> <span>Mike</span> <span>November</span> <span>Oscar</span> <span>Papa</span> <span>Quebec</span> <span>Romeo</span> <span>Sierra</span> <span>Tango</span> <span>Uniform</span> <span>Victor</span> <span>Whiskey</span> <span>Xray</span> <span>Yankee</span> <span>Zulu</span></td>
+	</tr>
+	<tr>
+		<td align="left"><span>2L</span> A1 ex<i>amp</i>le <a href="https://tcpdf.org">link</a> column span. Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu.</td>
+	</tr>
+	<tr>
+		<td align="center"><span>2C</span> A1 ex<i>amp</i>le <a href="https://tcpdf.org">link</a> column span. Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu.</td>
+	</tr>
+	<tr>
+		<td align="right"><span>2R</span> A1 ex<i>amp</i>le <a href="https://tcpdf.org">link</a> column span. Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu.</td>
+	</tr>
+	<tr>
+		<td align="left"><small>3L small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu</td>
+	</tr>
+	<tr>
+		<td align="center"><small>3C small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu</td>
+	</tr>
+	<tr>
+		<td align="right"><small>3R small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu</td>
+	</tr>
+</table>
+
+<table border="1" cellspacing="3" cellpadding="4">
+	<tr>
+		<td align="left"><img src="images/tcpdf_logo.jpg" alt="TCPDF logo" width="60" height="20" border="0" /></td>
+	</tr>
+	<tr>
+		<td align="center"><img src="images/tcpdf_logo.jpg" alt="TCPDF logo" width="60" height="20" border="0" /></td>
+	</tr>
+	<tr>
+		<td align="right"><img src="images/tcpdf_logo.jpg" alt="TCPDF logo" width="60" height="20" border="0" /></td>
+	</tr>
+</table>';
+
+$pdf->addHTMLCell(
+    $html_04, // string $html,
+    20, // float $posx = 0,
+    10, // float $posy = 0,
+);
+
+// ----------
+
+// HTML E
+
+$pageV05 = $pdf->addPage();
+
+$pdf->page->addContent($bfont6['out']);
+
+
+$html_05 = '<h2>HTML Text Flow</h2>
+Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. <em>Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur?</em> <em>Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?</em><br /><br /><b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i> -&gt; &nbsp;&nbsp; <b>A</b> + <b>B</b> = <b>C</b> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>B</i> = <i>A</i> &nbsp;&nbsp; -&gt; &nbsp;&nbsp; <i>C</i> - <i>A</i> = <i>B</i><br /><br /><b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u> <b>Bold</b><i>Italic</i><u>Underlined</u>
+
+<hr />
+
+<h2>HTML Text Justification</h2>
+
+<div style="text-align:justify;">Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa
+Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu</div>
+<br />
+<div style="text-align:justify;">Alfa <i>Bravo</i> Charlie <i>Delta</i> Echo <i>Foxtrot</i> Golf <i>Hotel</i> India <i>Juliett</i> Kilo <i>Lima</i> Mike <i>November</i> Oscar <i>Papa</i> Quebec <i>Romeo</i> Sierra <i>Tango</i> Uniform <i>Victor</i> Whiskey <i>Xray</i> Yankee <i>Zulu</i></div>';
+
+
+$pdf->addHTMLCell(
+    $html_05, // string $html,
+    20, // float $posx = 0,
+    10, // float $posy = 0,
 );
 
 // ----------

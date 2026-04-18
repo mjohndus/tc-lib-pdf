@@ -32,6 +32,10 @@ class TestableHTML extends \Com\Tecnick\Pdf\Tcpdf
             'maxwidth' => 0.0,
             'maxheight' => 0.0,
             'lineadvance' => 0.0,
+            'linebottom' => 0.0,
+            'lineascent' => 0.0,
+            'linewordspacing' => 0.0,
+            'linewrapped' => false,
             'basefont' => '',
         ],
         'fontcache' => [],
@@ -55,7 +59,7 @@ class TestableHTML extends \Com\Tecnick\Pdf\Tcpdf
             return;
         }
 
-        $this->initHTMLCellContext(0.0, 0.0, 0.0, 0.0, $this->testhrc);
+        $this->initHTMLCellContext($this->testhrc, 0.0, 0.0, 0.0, 0.0);
     }
 
     /** @phpstan-return THTMLRenderContext */
@@ -183,7 +187,24 @@ class TestableHTML extends \Com\Tecnick\Pdf\Tcpdf
         $this->initExposeRenderContextIfNeeded();
         $this->testhrc['dom'] = [$elm];
 
-        return $this->parseHTMLText($this->testhrc, $elm, $tpx, $tpy, $tpw, $tph);
+        return $this->parseHTMLText($this->testhrc, 0, $tpx, $tpy, $tpw, $tph);
+    }
+
+    /**
+     * @phpstan-param array<int, THTMLAttrib> $dom
+     */
+    public function exposeParseHTMLTextWithDom(
+        array $dom,
+        int $key,
+        float &$tpx,
+        float &$tpy,
+        float &$tpw,
+        float &$tph,
+    ): string {
+        $this->initExposeRenderContextIfNeeded();
+        $this->testhrc['dom'] = $dom;
+
+        return $this->parseHTMLText($this->testhrc, $key, $tpx, $tpy, $tpw, $tph);
     }
 
     public function exposeInitHTMLCellContext(
@@ -192,7 +213,17 @@ class TestableHTML extends \Com\Tecnick\Pdf\Tcpdf
         float $maxwidth,
         float $maxheight,
     ): void {
-        $this->initHTMLCellContext($originx, $originy, $maxwidth, $maxheight, $this->testhrc);
+        $this->initHTMLCellContext($this->testhrc, $originx, $originy, $maxwidth, $maxheight);
+    }
+
+    public function exposeSetHTMLLineState(float $lineadvance, float $linebottom, bool $linewrapped, float $lineascent = 0.0): void
+    {
+        $this->initExposeRenderContextIfNeeded();
+        $this->testhrc['cellctx']['lineadvance'] = $lineadvance;
+        $this->testhrc['cellctx']['linebottom'] = $linebottom;
+        $this->testhrc['cellctx']['lineascent'] = $lineascent;
+        $this->testhrc['cellctx']['linewordspacing'] = 0.0;
+        $this->testhrc['cellctx']['linewrapped'] = $linewrapped;
     }
 
     /** @phpstan-param THTMLAttrib $elm */
@@ -211,6 +242,23 @@ class TestableHTML extends \Com\Tecnick\Pdf\Tcpdf
         $this->testhrc['dom'] = [$elm];
 
         return $this->closeHTMLBlock($this->testhrc, 0, $tpx, $tpy, $tpw);
+    }
+
+    /**
+     * @phpstan-param array<int, THTMLAttrib> $dom
+     */
+    public function exposeParseHTMLTagOPENbrWithDom(
+        array $dom,
+        int $key,
+        float &$tpx,
+        float &$tpy,
+        float &$tpw,
+        float &$tph,
+    ): string {
+        $this->initExposeRenderContextIfNeeded();
+        $this->testhrc['dom'] = $dom;
+
+        return $this->parseHTMLTagOPENbr($this->testhrc, $key, $tpx, $tpy, $tpw, $tph);
     }
 }
 
@@ -241,12 +289,12 @@ class TestableHTMLNobrProbe extends TestableHTML
 class TestableHTMLBBoxProbe extends TestableHTML
 {
     /**
-     * @var array<int, array<string, float|string>>
+     * @var array<int, array{txt: string, in_x: float, in_y: float, bbox_x: float, bbox_y: float, bbox_w: float, bbox_h: float, bbox_end_x: float, font_size: float}>
      */
     private array $bboxTrace = [];
 
     /**
-     * @return array<int, array<string, float|string>>
+     * @return array<int, array{txt: string, in_x: float, in_y: float, bbox_x: float, bbox_y: float, bbox_w: float, bbox_h: float, bbox_end_x: float, font_size: float}>
      */
     public function exposeGetBBoxTrace(): array
     {
@@ -318,8 +366,11 @@ class TestableHTMLBBoxProbe extends TestableHTML
         $this->bboxTrace[] = [
             'txt' => $txt,
             'in_x' => $posx,
+            'in_y' => $posy,
             'bbox_x' => $bbox['x'],
+            'bbox_y' => $bbox['y'],
             'bbox_w' => $bbox['w'],
+            'bbox_h' => $bbox['h'],
             'bbox_end_x' => $bbox['x'] + $bbox['w'],
             'font_size' => (float) ($curfont['size'] ?? 0.0),
         ];
@@ -436,6 +487,61 @@ class HTMLTest extends TestUtil
 
         $obj->setULLIDot('img|png|4|4|bullet.png');
         $this->assertSame('img|png|4|4|bullet.png', $this->getObjectProperty($obj, 'ullidot'));
+    }
+
+    public function testHrcReferenceParameterIsFirstWhenPresent(): void
+    {
+        $ref = new \ReflectionClass(\Com\Tecnick\Pdf\HTML::class);
+
+        foreach ($ref->getMethods(\ReflectionMethod::IS_PROTECTED) as $method) {
+            $params = $method->getParameters();
+            foreach ($params as $idx => $param) {
+                if ($param->getName() !== 'hrc') {
+                    continue;
+                }
+
+                $ptype = $param->getType();
+                if (!$ptype instanceof \ReflectionNamedType) {
+                    continue;
+                }
+
+                if (($ptype->getName() !== 'array') || !$param->isPassedByReference()) {
+                    continue;
+                }
+
+                $this->assertSame(
+                    0,
+                    $idx,
+                    'Expected array &$hrc to be the first parameter in protected method ' . $method->getName(),
+                );
+            }
+        }
+    }
+
+    public function testDomHelperMethodsUseKeyParameter(): void
+    {
+        $ref = new \ReflectionClass(\Com\Tecnick\Pdf\HTML::class);
+        $methods = [
+            'estimateHTMLTextHeight',
+            'getHTMLFontMetric',
+            'getHTMLTextPrefix',
+            'getHTMLLineAdvance',
+            'getCurrentHTMLLineAdvance',
+        ];
+
+        foreach ($methods as $name) {
+            $method = $ref->getMethod($name);
+            $params = $method->getParameters();
+
+            $this->assertCount(2, \array_slice($params, 0, 2), 'Unexpected leading parameters in ' . $name);
+            $this->assertSame('hrc', $params[0]->getName(), 'First parameter must be hrc in ' . $name);
+            $this->assertTrue($params[0]->isPassedByReference(), 'First parameter must be by-reference in ' . $name);
+            $this->assertSame('key', $params[1]->getName(), 'Second parameter must be key in ' . $name);
+
+            $ptype = $params[1]->getType();
+            $this->assertInstanceOf(\ReflectionNamedType::class, $ptype, 'Second parameter must have named type in ' . $name);
+            $this->assertSame('int', $ptype->getName(), 'Second parameter type must be int in ' . $name);
+        }
     }
 
     public function testTidyHTMLReturnsStyledXhtml(): void
@@ -1071,6 +1177,21 @@ class HTMLTest extends TestUtil
         );
     }
 
+    public function testGetHTMLCellRendersTopLevelTableOuterBorder(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $html = '<table border="1" cellspacing="3" cellpadding="4">'
+            . '<tr><td style="border:0">X</td></tr>'
+            . '</table>';
+
+        $out = $obj->getHTMLCell($html, 0, 0, 80, 30);
+
+        $this->assertNotSame('', $out);
+        $this->assertMatchesRegularExpression('/\sre\s+s\b/s', $out);
+    }
+
     public function testGetHTMLCellCentersMixedDirectionInlineRunAsOneLine(): void
     {
         $obj = $this->getBBoxProbeTestObject();
@@ -1093,6 +1214,324 @@ class HTMLTest extends TestUtil
         $lineLeft = (float) $trace[0]['bbox_x'];
         $lineRight = (float) $trace[2]['bbox_end_x'];
         $this->assertEqualsWithDelta($cellWidth / 2, ($lineLeft + $lineRight) / 2, 1e-9);
+    }
+
+    public function testGetHTMLCellCentersWrappedInlineSpansPerLine(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $cellWidth = 60.0;
+        $html = '<table border="1" cellspacing="3" cellpadding="4"><tr><td align="center">'
+            . '<span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> '
+            . '<span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span>'
+            . '</td></tr></table>';
+
+        $obj->exposeResetBBoxTrace();
+        $out = $obj->getHTMLCell($html, 0, 0, $cellWidth, 0);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace);
+
+        /** @var array<string, array{left: float, right: float}> $lines */
+        $lines = [];
+        foreach ($trace as $frag) {
+            $key = \sprintf('%.6f', (float) $frag['bbox_y']);
+            if (!isset($lines[$key])) {
+                $lines[$key] = [
+                    'left' => (float) $frag['bbox_x'],
+                    'right' => (float) $frag['bbox_end_x'],
+                ];
+                continue;
+            }
+
+            $lines[$key]['left'] = \min($lines[$key]['left'], (float) $frag['bbox_x']);
+            $lines[$key]['right'] = \max($lines[$key]['right'], (float) $frag['bbox_end_x']);
+        }
+
+        $lineboxes = \array_values($lines);
+        $this->assertGreaterThanOrEqual(2, \count($lineboxes));
+
+        $cellCenter = $cellWidth / 2;
+        $checklines = \min(3, \count($lineboxes));
+        for ($idx = 0; $idx < $checklines; ++$idx) {
+            $line = $lineboxes[$idx];
+            $this->assertEqualsWithDelta($cellCenter, ($line['left'] + $line['right']) / 2, 1.0);
+        }
+
+        // The first wrapped line must not be left-flush when centered.
+        $this->assertGreaterThan(0.5, $lineboxes[0]['left']);
+    }
+
+    public function testGetHTMLCellRightAlignedWrappedInlineSpansUseMultipleLines(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $cellWidth = 150.0;
+        $html = '<table border="1" cellspacing="3" cellpadding="4"><tr><td align="right">'
+            . '<span>1R</span> <span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> '
+            . '<span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span> <span>India</span> '
+            . '<span>Juliett</span> <span>Kilo</span> <span>Lima</span> <span>Mike</span> <span>November</span> '
+            . '<span>Oscar</span> <span>Papa</span> <span>Quebec</span> <span>Romeo</span> <span>Sierra</span> '
+            . '<span>Tango</span> <span>Uniform</span> <span>Victor</span> <span>Whiskey</span> <span>Xray</span> '
+            . '<span>Yankee</span> <span>Zulu</span>'
+            . '</td></tr></table>';
+
+        $obj->exposeResetBBoxTrace();
+        $out = $obj->getHTMLCell($html, 0, 0, $cellWidth, 0);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace);
+
+        /** @var array<string, bool> $linekeys */
+        $linekeys = [];
+        foreach ($trace as $frag) {
+            $linekeys[\sprintf('%.6f', (float) $frag['bbox_y'])] = true;
+        }
+
+        $this->assertGreaterThanOrEqual(2, \count($linekeys));
+    }
+
+    #[DataProvider('tableLineRegressionProvider')]
+    public function testGetHTMLCellTableLineRegression(
+        string $lineid,
+        string $cellHtml,
+        int $expectedLines,
+        string $expectedFirstTxt,
+        ?string $expectedSecondTxt,
+    ): void {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $html = '<table border="1" cellspacing="3" cellpadding="4"><tr>' . $cellHtml . '</tr></table>';
+
+        $obj->exposeResetBBoxTrace();
+        $out = $obj->getHTMLCell($html, 0, 0, 150, 0);
+        $this->assertNotSame('', $out, 'Rendered output should not be empty for row ' . $lineid);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace, 'BBox trace should not be empty for row ' . $lineid);
+
+        $this->assertSame($expectedFirstTxt, (string) $trace[0]['txt']);
+        if ($expectedSecondTxt !== null) {
+            $this->assertGreaterThanOrEqual(2, \count($trace));
+            $this->assertStringContainsString($expectedSecondTxt, (string) $trace[1]['txt']);
+        }
+
+        /** @var array<string, bool> $linekeys */
+        $linekeys = [];
+        /** @var array<int, float> $lineOrder */
+        $lineOrder = [];
+        foreach ($trace as $frag) {
+            $liney = (float) $frag['bbox_y'];
+            $key = \sprintf('%.6f', $liney);
+            if (!isset($linekeys[$key])) {
+                $linekeys[$key] = true;
+                $lineOrder[] = $liney;
+            }
+        }
+
+        $this->assertCount($expectedLines, $linekeys, 'Unexpected wrapped line count for row ' . $lineid);
+
+        // Ensure line progression is monotonic (no backwards jumps/overlap in render order).
+        for ($idx = 1; $idx < \count($lineOrder); ++$idx) {
+            $this->assertGreaterThanOrEqual(
+                $lineOrder[$idx - 1],
+                $lineOrder[$idx],
+                'Non-monotonic line y progression detected for row ' . $lineid,
+            );
+        }
+    }
+
+    /**
+     * @return array<int, array{0: string, 1: string, 2: int, 3: string, 4: ?string}>
+     */
+    public static function tableLineRegressionProvider(): array
+    {
+        $line1Spans = '<span>Alfa</span> <span>Bravo</span> <span>Charlie</span> <span>Delta</span> '
+            . '<span>Echo</span> <span>Foxtrot</span> <span>Golf</span> <span>Hotel</span> '
+            . '<span>India</span> <span>Juliett</span> <span>Kilo</span> <span>Lima</span> '
+            . '<span>Mike</span> <span>November</span> <span>Oscar</span> <span>Papa</span> '
+            . '<span>Quebec</span> <span>Romeo</span> <span>Sierra</span> <span>Tango</span> '
+            . '<span>Uniform</span> <span>Victor</span> <span>Whiskey</span> <span>Xray</span> '
+            . '<span>Yankee</span> <span>Zulu</span>';
+
+        $line2Text = ' A1 ex<i>amp</i>le <a href="https://tcpdf.org">link</a> column span. '
+            . 'One two tree four five six seven eight nine ten.';
+
+        return [
+            [
+                '1L',
+                '<td align="left"><span>1L</span> ' . $line1Spans . '</td>',
+                2,
+                '1L',
+                null,
+            ],
+            [
+                '1C',
+                '<td align="center"><span>1C</span> ' . $line1Spans . '</td>',
+                2,
+                '1C',
+                null,
+            ],
+            [
+                '1R',
+                '<td align="right"><span>1R</span> ' . $line1Spans . '</td>',
+                2,
+                '1R',
+                null,
+            ],
+            [
+                '2L',
+                '<td align="left"><span>2L</span>' . $line2Text . '</td>',
+                1,
+                '2L',
+                'A1 ex',
+            ],
+            [
+                '2C',
+                '<td align="center"><span>2C</span>' . $line2Text . '</td>',
+                1,
+                '2C',
+                'A1 ex',
+            ],
+            [
+                '2R',
+                '<td align="right"><span>2R</span>' . $line2Text . '</td>',
+                1,
+                '2R',
+                'A1 ex',
+            ],
+            [
+                '3L',
+                '<td align="left"><small>3L small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+                    . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+                    . 'Yankee Zulu</td>',
+                2,
+                '3L small text',
+                'Alfa',
+            ],
+            [
+                '3C',
+                '<td align="center"><small>3C small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+                    . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+                    . 'Yankee Zulu</td>',
+                2,
+                '3C small text',
+                'Alfa',
+            ],
+            [
+                '3R',
+                '<td align="right"><small>3R small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+                    . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+                    . 'Yankee Zulu</td>',
+                2,
+                '3R small text',
+                'Alfa',
+            ],
+        ];
+    }
+
+    #[DataProvider('smallPrefixAlignmentProvider')]
+    public function testGetHTMLCellMixedSmallPrefixKeepsFollowingTextOnFirstLine(string $align): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $cellWidth = 150.0;
+        $html = '<table border="1" cellspacing="3" cellpadding="4"><tr><td align="' . $align . '">'
+            . '<small>3X small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett '
+            . 'Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+            . 'Yankee Zulu'
+            . '</td></tr></table>';
+
+        $obj->exposeResetBBoxTrace();
+        $out = $obj->getHTMLCell($html, 0, 0, $cellWidth, 0);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace);
+
+        $this->assertGreaterThanOrEqual(2, \count($trace));
+        $this->assertSame('3X small text', \trim((string) $trace[0]['txt']));
+        $this->assertStringContainsString('Alfa', (string) $trace[1]['txt']);
+
+        // The text after </small> should start on the same line (or higher baseline-adjusted)
+        // and not after a forced line advance.
+        $this->assertLessThanOrEqual(
+            (float) $trace[0]['in_y'] + 0.001,
+            (float) $trace[1]['in_y'],
+        );
+    }
+
+    public function testGetHTMLCellExampleTableSmallPrefixCenterRightKeepsFollowingTextOnSameLine(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $html = '<table border="1" cellspacing="3" cellpadding="4">'
+            . '<tr><td align="left"><small>3L small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+            . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+            . 'Yankee Zulu</td></tr>'
+            . '<tr><td align="center"><small>3C small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+            . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+            . 'Yankee Zulu</td></tr>'
+            . '<tr><td align="right"><small>3R small text</small> Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India '
+            . 'Juliett Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray '
+            . 'Yankee Zulu</td></tr>'
+            . '</table>';
+
+        $obj->exposeResetBBoxTrace();
+        $out = $obj->getHTMLCell($html, 0, 0, 150, 0);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace);
+
+        foreach (['3C small text', '3R small text'] as $label) {
+            $smallIdx = null;
+            foreach ($trace as $idx => $item) {
+                if (\trim((string) $item['txt']) === $label) {
+                    $smallIdx = $idx;
+                    break;
+                }
+            }
+
+            $this->assertNotNull($smallIdx, 'Missing trace fragment: ' . $label);
+
+            $nextIdx = null;
+            for ($idx = ((int) $smallIdx + 1); $idx < \count($trace); ++$idx) {
+                if (\trim((string) $trace[$idx]['txt']) === '') {
+                    continue;
+                }
+
+                $nextIdx = $idx;
+                break;
+            }
+
+            $this->assertNotNull($nextIdx, 'Missing follow-up fragment for: ' . $label);
+            $this->assertStringContainsString('Alfa', (string) $trace[(int) $nextIdx]['txt']);
+
+            $this->assertLessThanOrEqual(
+                (float) $trace[(int) $smallIdx]['in_y'] + 0.001,
+                (float) $trace[(int) $nextIdx]['in_y'],
+                'Text after ' . $label . ' moved to a new line.',
+            );
+        }
+    }
+
+    /**
+     * @return array<int, array{0: string}>
+     */
+    public static function smallPrefixAlignmentProvider(): array
+    {
+        return [
+            ['center'],
+            ['right'],
+        ];
     }
 
     public function testParseHTMLTextWrapsLargeInlineFragmentBeforeItOverflowsRemainingWidth(): void
@@ -1156,6 +1595,140 @@ class HTMLTest extends TestUtil
         $this->assertLessThanOrEqual($cellWidth + 1e-9, (float) $trace[1]['bbox_end_x']);
     }
 
+    public function testParseHTMLTextKeepsBreakableFragmentOnCurrentLineWhenOnlyTailOverflows(): void
+    {
+        $measure = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($measure);
+        $measure->exposeInitHTMLCellContext(0, 0, 300, 0);
+
+        $prefixElm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => 'A1 example link',
+        ]);
+        $breakableElm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => ' column span one two three four five six seven eight nine ten',
+        ]);
+        $firstChunkElm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => ' column span',
+        ]);
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 300.0;
+        $tph = 0.0;
+        $measure->exposeResetBBoxTrace();
+        $measure->exposeParseHTMLText($prefixElm, $tpx, $tpy, $tpw, $tph);
+        $prefixTrace = $measure->exposeGetBBoxTrace();
+        $prefixWidth = (float) $prefixTrace[0]['bbox_w'];
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 300.0;
+        $tph = 0.0;
+        $measure->exposeResetBBoxTrace();
+        $measure->exposeParseHTMLText($breakableElm, $tpx, $tpy, $tpw, $tph);
+        $breakableTrace = $measure->exposeGetBBoxTrace();
+        $breakableWidth = (float) $breakableTrace[0]['bbox_w'];
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 300.0;
+        $tph = 0.0;
+        $measure->exposeResetBBoxTrace();
+        $measure->exposeParseHTMLText($firstChunkElm, $tpx, $tpy, $tpw, $tph);
+        $chunkTrace = $measure->exposeGetBBoxTrace();
+        $chunkWidth = (float) $chunkTrace[0]['bbox_w'];
+
+        $cellWidth = $prefixWidth + $chunkWidth + 0.2;
+        $cellWidth = \min($cellWidth, $prefixWidth + $breakableWidth - 0.1);
+
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeInitHTMLCellContext(0, 0, $cellWidth, 0);
+        $obj->exposeResetBBoxTrace();
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = $cellWidth;
+        $tph = 0.0;
+        $obj->exposeParseHTMLText($prefixElm, $tpx, $tpy, $tpw, $tph);
+        $obj->exposeParseHTMLText($breakableElm, $tpx, $tpy, $tpw, $tph);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertCount(2, $trace);
+        $this->assertSame('A1 example link', $trace[0]['txt']);
+        $this->assertSame(' column span one two three four five six seven eight nine ten', $trace[1]['txt']);
+        $this->assertEqualsWithDelta(0.0, (float) $trace[1]['bbox_x'], 1e-9);
+        $this->assertGreaterThan((float) $trace[0]['bbox_y'], (float) $trace[1]['bbox_y']);
+    }
+
+    public function testParseHTMLTextTreatsLeadingSpaceLongWordAsUnbreakableForPreWrap(): void
+    {
+        $measure = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($measure);
+        $measure->exposeInitHTMLCellContext(0, 0, 220, 0);
+
+        $prefixElm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => 'prefix ',
+        ]);
+        $wordElm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => ' thisisanotherverylongword',
+        ]);
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 220.0;
+        $tph = 0.0;
+        $measure->exposeResetBBoxTrace();
+        $measure->exposeParseHTMLText($prefixElm, $tpx, $tpy, $tpw, $tph);
+        $prefixTrace = $measure->exposeGetBBoxTrace();
+        $prefixWidth = (float) $prefixTrace[0]['bbox_w'];
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 220.0;
+        $tph = 0.0;
+        $measure->exposeResetBBoxTrace();
+        $measure->exposeParseHTMLText($wordElm, $tpx, $tpy, $tpw, $tph);
+        $wordTrace = $measure->exposeGetBBoxTrace();
+        $wordWidth = (float) $wordTrace[0]['bbox_w'];
+
+        $cellWidth = $prefixWidth + $wordWidth - 0.1;
+
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeInitHTMLCellContext(0, 0, $cellWidth, 0);
+        $obj->exposeResetBBoxTrace();
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = $cellWidth;
+        $tph = 0.0;
+        $obj->exposeParseHTMLText($prefixElm, $tpx, $tpy, $tpw, $tph);
+        $obj->exposeParseHTMLText($wordElm, $tpx, $tpy, $tpw, $tph);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertCount(2, $trace);
+        $this->assertSame('prefix ', $trace[0]['txt']);
+        $this->assertSame(' thisisanotherverylongword', $trace[1]['txt']);
+        $this->assertEqualsWithDelta(0.0, (float) $trace[1]['bbox_x'], 1e-9);
+        $this->assertGreaterThan((float) $trace[0]['bbox_y'], (float) $trace[1]['bbox_y']);
+    }
+
     public function testAllParseHTMLTagMethodsCanBeInvoked(): void
     {
         $probe = $this->getInternalTestObject();
@@ -1204,6 +1777,32 @@ class HTMLTest extends TestUtil
 
             $obj->exposeInvokeParseHTMLTagMethod($method, $elm, $tpx, $tpy, $tpw, $tph);
         }
+    }
+
+    public function testParseHTMLTagOpenSpanAppliesColorAttributes(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $elm = $obj->exposeGetHTMLRootProperties();
+        $elm['value'] = 'span';
+        $elm['fgcolor'] = 'black';
+        $elm['bgcolor'] = '#ffff00';
+        $elm['attribute'] = [
+            'color' => '#ff0000',
+            'bgcolor' => '#00ff00',
+        ];
+
+        $tpx = 0.0;
+        $tpy = 0.0;
+        $tpw = 40.0;
+        $tph = 20.0;
+
+        $obj->exposeInvokeParseHTMLTagMethod('parseHTMLTagOPENspan', $elm, $tpx, $tpy, $tpw, $tph);
+
+        $hrc = $obj->exposeGetHTMLRenderContext();
+        $this->assertStringContainsString('100%,0%,0%', (string) $hrc['dom'][0]['fgcolor']);
+        $this->assertStringContainsString('0%,100%,0%', (string) $hrc['dom'][0]['bgcolor']);
     }
 
     public function testParseHTMLTagTheadOpenCloseManageTableStack(): void
@@ -1445,7 +2044,7 @@ class HTMLTest extends TestUtil
 
         $this->assertCount(2, $states);
         $this->assertSame('true', $states[0]);
-        $this->assertSame('true', $states[1]);
+        $this->assertSame('', $states[1]);
     }
 
     public function testGetHTMLCellBreaksBeforeNobrBlockOnOverflow(): void
@@ -1893,6 +2492,40 @@ class HTMLTest extends TestUtil
         $this->assertEqualsWithDelta($heights[0], $heights[1] + $heights[2], 0.0001);
     }
 
+    public function testGetHTMLCellRowspanHeightIncludesCellspacingBetweenRows(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<table cellspacing="3">'
+            . '<tr><td rowspan="2" style="border:1px solid black">A</td><td style="border:1px solid black">Top</td></tr>'
+            . '<tr><td style="border:1px solid black">Bottom</td></tr>'
+            . '</table>',
+            0,
+            0,
+            30,
+            20,
+        );
+
+        $this->assertNotSame('', $out);
+        $matches = [];
+        \preg_match_all('/(-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) re\\s+s/', $out, $matches, PREG_SET_ORDER);
+        $this->assertGreaterThanOrEqual(3, \count($matches));
+
+        $heights = \array_map(
+            static fn(array $match): float => \abs((float) $match[4]),
+            $matches,
+        );
+        \rsort($heights);
+
+        $this->assertGreaterThan(
+            $heights[1] + $heights[2],
+            $heights[0],
+            'Rowspan height should include inter-row cellspacing between spanned rows.',
+        );
+    }
+
     public function testGetHTMLCellDrawsTableCellBackgroundFillWhenSpecified(): void
     {
         $obj = $this->getTestObject();
@@ -1903,6 +2536,120 @@ class HTMLTest extends TestUtil
         $this->assertNotSame('', $out);
         $this->assertStringContainsString(' re', $out);
         $this->assertStringContainsString("f\n", $out);
+    }
+
+    public function testGetHTMLCellDrawsInlineBackgroundFillWhenSpecified(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell('<span bgcolor="#eeeeee">A</span>', 0, 0, 30, 12);
+
+        $this->assertNotSame('', $out);
+        $this->assertStringContainsString(' re', $out);
+        $this->assertStringContainsString("f\n", $out);
+    }
+
+    public function testGetHTMLCellExtendsInlineSmallBackgroundAcrossWrappedLines(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $html = '<small color="#ff0000" bgcolor="#ffff00">small small small small small small small small small small small small small small small small small small small small</small>';
+
+        $extractFillSpan = static function (string $out): float {
+            $matches = [];
+            \preg_match_all('/(-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) re\\s+f/', $out, $matches, PREG_SET_ORDER);
+            if ($matches === []) {
+                return 0.0;
+            }
+
+            $miny = PHP_FLOAT_MAX;
+            $maxy = -PHP_FLOAT_MAX;
+            foreach ($matches as $match) {
+                $posy = (float) $match[2];
+                $height = \abs((float) $match[4]);
+                $miny = \min($miny, $posy);
+                $maxy = \max($maxy, $posy + $height);
+            }
+
+            if ($maxy <= $miny) {
+                return 0.0;
+            }
+
+            return $maxy - $miny;
+        };
+
+        $outNoWrap = $obj->getHTMLCell($html, 0, 0, 160, 20);
+        $outWrap = $obj->getHTMLCell($html, 0, 0, 40, 20);
+
+        $this->assertNotSame('', $outNoWrap);
+        $this->assertNotSame('', $outWrap);
+
+        $nowrapHeight = $extractFillSpan($outNoWrap);
+        $wrapHeight = $extractFillSpan($outWrap);
+
+        $this->assertGreaterThan(0.0, $nowrapHeight);
+        $this->assertGreaterThan(0.0, $wrapHeight);
+        $this->assertGreaterThan(
+            $nowrapHeight + 0.001,
+            $wrapHeight,
+            'Wrapped inline <small> background must cover more than one rendered line.',
+        );
+    }
+
+    public function testGetHTMLCellDrawsMultipleFillRectsForWrappedInlineSmallBackground(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $html = '<small color="#ff0000" bgcolor="#ffff00">'
+            . 'small small small small small small small small small small small small'
+            . '</small>';
+
+        $out = $obj->getHTMLCell($html, 0, 0, 40, 20);
+        $this->assertNotSame('', $out);
+
+        $matches = [];
+        \preg_match_all('/(-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) re\\s+f/', $out, $matches, PREG_SET_ORDER);
+        $this->assertNotEmpty($matches);
+
+        $linekeys = [];
+        foreach ($matches as $match) {
+            $linekeys[\sprintf('%.3f', (float) $match[2])] = true;
+        }
+
+        $this->assertGreaterThanOrEqual(
+            2,
+            \count($linekeys),
+            'Wrapped inline <small> background should be drawn on more than one line.',
+        );
+    }
+
+    public function testGetHTMLCellExpandsBlockBackgroundFillAcrossLineWidth(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<div style="background-color:#880000;color:white;">Hello World!<br />Hello</div>',
+            0,
+            0,
+            30,
+            20,
+        );
+
+        $this->assertNotSame('', $out);
+        $matches = [];
+        \preg_match_all('/(-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) re\\s+f/', $out, $matches, PREG_SET_ORDER);
+        $this->assertNotEmpty($matches);
+
+        $maxwidth = 0.0;
+        foreach ($matches as $match) {
+            $maxwidth = \max($maxwidth, \abs((float) $match[3]));
+        }
+
+        $this->assertGreaterThan(20.0, $maxwidth);
     }
 
     public function testGetHTMLCellRendersTableHeadAndBodyRows(): void
@@ -2057,6 +2804,68 @@ class HTMLTest extends TestUtil
         $this->assertStringContainsString(' re', $out, 'Expected a cell rectangle to be drawn');
     }
 
+    public function testGetHTMLCellRendersTableOuterBorderFromTableAttribute(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $withoutBorder = $obj->getHTMLCell(
+            '<table cellspacing="3" cellpadding="4"><tr><td>A</td></tr></table>',
+            0,
+            0,
+            30,
+            20,
+        );
+
+        $withBorder = $obj->getHTMLCell(
+            '<table border="1" cellspacing="3" cellpadding="4"><tr><td>A</td></tr></table>',
+            0,
+            0,
+            30,
+            20,
+        );
+
+        $this->assertNotSame('', $withoutBorder);
+        $this->assertNotSame('', $withBorder);
+        $this->assertStringContainsString('(A)', $withBorder);
+        $this->assertStringNotContainsString(' re', $withoutBorder);
+        $this->assertStringContainsString(' re', $withBorder, 'Expected outer table border rectangle to be drawn');
+    }
+
+    public function testGetHTMLCellAppliesCellspacingBetweenOuterAndInnerBorders(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<table border="1" cellspacing="3"><tr><td style="border:1px solid black">A</td></tr></table>',
+            0,
+            0,
+            30,
+            20,
+        );
+
+        $this->assertNotSame('', $out);
+        $matches = [];
+        \preg_match_all('/(-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+) re\\s+s/', $out, $matches, PREG_SET_ORDER);
+        $this->assertGreaterThanOrEqual(2, \count($matches));
+
+        $xvalues = [];
+        foreach ($matches as $match) {
+            $xvalues[] = (float) $match[1];
+        }
+
+        if ($xvalues === []) {
+            $this->fail('Expected at least one x position extracted from border rectangles');
+        }
+
+        $this->assertGreaterThan(
+            0.1,
+            \max($xvalues) - \min($xvalues),
+            'Expected distinct x positions for inner cell border and outer table border when cellspacing is set',
+        );
+    }
+
     public function testGetHTMLCellTreatsFormAsBlockContainer(): void
     {
         $obj = $this->getTestObject();
@@ -2176,6 +2985,68 @@ class HTMLTest extends TestUtil
         // tpy should not advance by an extra line — no inline content to push past
         $this->assertSame(20.0, $tpx);
         $this->assertSame(140.0, $tpy);
+    }
+
+    public function testBrAtLineStartAfterWrappedPlainTextAdvancesOnce(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeInitHTMLCellContext(20.0, 120.0, 150.0, 0.0);
+
+        $dom = [
+            0 => $this->makeHtmlNode([
+                'tag' => false,
+                'value' => 'wrapped line',
+            ]),
+            1 => $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => true,
+                'self' => true,
+                'value' => 'br',
+            ]),
+        ];
+
+        $tpx = 20.0;
+        $tpy = 140.0;
+        $tpw = 150.0;
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLTagOPENbrWithDom($dom, 1, $tpx, $tpy, $tpw, $tph);
+
+        $this->assertGreaterThan(140.0, $tpy);
+        $this->assertSame(20.0, $tpx);
+    }
+
+    public function testBrAtLineStartStillAdvancesAfterAnotherBrTag(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeInitHTMLCellContext(20.0, 120.0, 150.0, 0.0);
+
+        $dom = [
+            0 => $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => true,
+                'self' => true,
+                'value' => 'br',
+            ]),
+            1 => $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => true,
+                'self' => true,
+                'value' => 'br',
+            ]),
+        ];
+
+        $tpx = 20.0;
+        $tpy = 140.0;
+        $tpw = 150.0;
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLTagOPENbrWithDom($dom, 1, $tpx, $tpy, $tpw, $tph);
+
+        $this->assertGreaterThan(140.0, $tpy);
+        $this->assertSame(20.0, $tpx);
     }
 
     public function testSanitizeHTMLRemovesHeadAndStyleBlocks(): void
@@ -2630,7 +3501,7 @@ class HTMLTest extends TestUtil
         $this->assertIsInt($numMatches);
         $this->assertGreaterThanOrEqual(2, $numMatches);
         $this->assertGreaterThan(0.0, (float) $matches[1][0]);
-        $this->assertEqualsWithDelta(0.0, (float) $matches[1][1], 0.000001);
+        $this->assertGreaterThan(0.0, (float) $matches[2][0]);
     }
 
     public function testGetHTMLDOMTextNodesInheritParentFormatting(): void
@@ -3619,6 +4490,123 @@ class HTMLTest extends TestUtil
         $this->assertNotSame($outSameLine, $outNewLine);
     }
 
+    public function testParseHTMLTagOPENbrSkipsAdvanceAfterWrappedLine(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 0.0, 100.0, 0.0);
+        $obj->exposeSetHTMLLineState(0.0, 0.0, true);
+
+        $dom = [
+            $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => false,
+                'value' => 'font',
+            ]),
+            $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => true,
+                'self' => true,
+                'value' => 'br',
+            ]),
+        ];
+
+        $tpx = 10.0;
+        $tpy = 20.0;
+        $tpw = 100.0;
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLTagOPENbrWithDom($dom, 1, $tpx, $tpy, $tpw, $tph);
+
+        $this->assertEqualsWithDelta(20.0, $tpy, 1e-9);
+        $this->assertEqualsWithDelta(10.0, $tpx, 1e-9);
+    }
+
+    public function testParseHTMLTagOPENbrAdvancesWhenLineIsNotWrapped(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 0.0, 100.0, 0.0);
+        $obj->exposeSetHTMLLineState(0.0, 0.0, false);
+
+        $dom = [
+            $this->makeHtmlNode([
+                'tag' => false,
+                'value' => 'normal',
+            ]),
+            $this->makeHtmlNode([
+                'tag' => true,
+                'opening' => true,
+                'self' => true,
+                'value' => 'br',
+            ]),
+        ];
+
+        $tpx = 10.0;
+        $tpy = 20.0;
+        $tpw = 100.0;
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLTagOPENbrWithDom($dom, 1, $tpx, $tpy, $tpw, $tph);
+
+        $this->assertGreaterThan(20.0, $tpy);
+        $this->assertEqualsWithDelta(10.0, $tpx, 1e-9);
+    }
+
+    public function testParseHTMLTextOverflowAdvancesByCurrentLineMaxHeight(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 0.0, 40.0, 0.0);
+        // Simulate an in-progress line that already contains a taller inline fragment.
+        $obj->exposeSetHTMLLineState(12.0, 0.0, false);
+
+        $elm = $this->makeHtmlNode([
+            'tag' => false,
+            'opening' => false,
+            'self' => false,
+            'value' => 'thisisaverylongwordthisisaverylongwordthisisaverylongword',
+            'fontsize' => 6.0,
+        ]);
+
+        $tpx = 38.0; // near line end => tiny remaining width
+        $tpy = 20.0;
+        $tpw = 12.0;
+        $tph = 0.0;
+
+        $out = $obj->exposeParseHTMLText($elm, $tpx, $tpy, $tpw, $tph);
+
+        $this->assertNotSame('', $out);
+        // The parser must advance to next line using the tracked max line height (12.0)
+        // before rendering the overflow fragment.
+        $this->assertGreaterThanOrEqual(32.0, $tpy);
+    }
+
+    public function testGetHTMLCellMixedInlineSizesShareBaseline(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeResetBBoxTrace();
+        $html = '<font size="10">A</font><font size="22">B</font><font size="10">C</font>';
+        $out = $obj->getHTMLCell($html, 0, 0, 200, 20);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertCount(3, $trace);
+        $this->assertSame('A', $trace[0]['txt']);
+        $this->assertSame('B', $trace[1]['txt']);
+        $this->assertSame('C', $trace[2]['txt']);
+
+        // Small fragments on the same line must align to the same baseline offset.
+        $this->assertEqualsWithDelta((float) $trace[0]['bbox_y'], (float) $trace[2]['bbox_y'], 1e-9);
+        // The larger fragment sits higher while sharing the same baseline.
+        $this->assertGreaterThan((float) $trace[1]['bbox_y'], (float) $trace[0]['bbox_y']);
+    }
+
     // --- Fix tests: <hr> width/height ---
 
     public function testGetHTMLCellHrRespectsWidthAttribute(): void
@@ -3695,6 +4683,251 @@ class HTMLTest extends TestUtil
         $this->assertNotSame('', $outTop);
         // Different y-offsets produce different PDF streams
         $this->assertNotSame($outBottom, $outTop);
+    }
+
+    public function testGetHTMLCellImgBottomAlignmentUsesTextBaseline(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 4);
+        \imagecolorallocate($img, 255, 255, 255);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $b64src = 'data:image/png;base64,' . \base64_encode((string) $raw);
+
+        $out = $obj->getHTMLCell(
+            'left <img src="' . $b64src . '" width="4" height="30" /> right',
+            0,
+            0,
+            80,
+            40,
+        );
+
+        $this->assertSame(1, \preg_match('/BT .*? [-0-9.]+ ([-0-9.]+) Td \(left \) Tj ET/s', $out, $textMatch));
+        $this->assertSame(1, \preg_match('/q [-0-9.]+ 0 0 [-0-9.]+ [-0-9.]+ ([-0-9.]+) cm \/IMG\d+ Do Q/', $out, $imgMatch));
+
+        $this->assertEqualsWithDelta((float) $textMatch[1], (float) $imgMatch[1], 0.01);
+    }
+
+    public function testGetHTMLCellTallBottomAlignedImageShiftsWholeLineDown(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 4);
+        \imagecolorallocate($img, 255, 255, 255);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $b64src = 'data:image/png;base64,' . \base64_encode((string) $raw);
+
+        $obj->exposeResetBBoxTrace();
+        $obj->getHTMLCell('left right', 0, 0, 80, 40);
+        $plainTrace = $obj->exposeGetBBoxTrace();
+
+        $obj2 = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj2);
+        $obj2->exposeResetBBoxTrace();
+        $obj2->getHTMLCell(
+            'left <img src="' . $b64src . '" width="4" height="30" /> right',
+            0,
+            0,
+            80,
+            40,
+        );
+        $imageTrace = $obj2->exposeGetBBoxTrace();
+
+        $this->assertCount(1, $plainTrace);
+        $this->assertCount(2, $imageTrace);
+        $this->assertSame('left ', $imageTrace[0]['txt']);
+        $this->assertSame(' right', $imageTrace[1]['txt']);
+        $this->assertGreaterThan((float) $plainTrace[0]['bbox_y'], (float) $imageTrace[0]['bbox_y']);
+        $this->assertEqualsWithDelta((float) $imageTrace[0]['bbox_y'], (float) $imageTrace[1]['bbox_y'], 1e-9);
+    }
+
+    public function testGetHTMLCellCentersInlineImageRunInsideDiv(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 4);
+        \imagecolorallocate($img, 0, 0, 0);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $src = 'data:image/png;base64,' . \base64_encode((string) $raw);
+
+        $htmlCenter = '<div style="text-align:center">'
+            . '<img src="' . $src . '" width="4" height="4" />'
+            . '<img src="' . $src . '" width="4" height="4" />'
+            . '</div>';
+        $htmlLeft = '<div style="text-align:left">'
+            . '<img src="' . $src . '" width="4" height="4" />'
+            . '<img src="' . $src . '" width="4" height="4" />'
+            . '</div>';
+
+        $outCenter = $obj->getHTMLCell($htmlCenter, 0, 0, 40, 20);
+
+        $obj2 = $this->getTestObject();
+        $this->initFontAndPage($obj2);
+        $outLeft = $obj2->getHTMLCell($htmlLeft, 0, 0, 40, 20);
+
+        $this->assertNotSame('', $outCenter);
+        $this->assertNotSame('', $outLeft);
+        $this->assertNotSame($outLeft, $outCenter);
+    }
+
+    public function testParseHTMLTextJustifyTracksSpacingAcrossInlineFragments(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 10.0, 40.0, 0.0);
+
+        $html = '<div style="text-align:justify;">'
+            . 'Alfa <i>Bravo</i> Charlie <i>Delta</i> Echo <i>Foxtrot</i> Golf <i>Hotel</i> '
+            . 'India <i>Juliett</i> Kilo <i>Lima</i> Mike <i>November</i>'
+            . '</div>';
+        $dom = $obj->exposeGetHTMLDOM($html);
+
+        $firstTextKey = null;
+        foreach ($dom as $key => $elm) {
+            if (!empty($elm['tag'])) {
+                continue;
+            }
+
+            if (\str_starts_with((string) $elm['value'], 'Alfa')) {
+                $firstTextKey = $key;
+                break;
+            }
+        }
+
+        $this->assertNotNull($firstTextKey);
+
+        $tpx = 10.0;
+        $tpy = 10.0;
+        $tpw = 40.0;
+        $tph = 0.0;
+
+        $out = $obj->exposeParseHTMLTextWithDom($dom, (int) $firstTextKey, $tpx, $tpy, $tpw, $tph);
+        $this->assertNotSame('', $out);
+
+        $ctx = $obj->exposeGetHTMLRenderContext();
+        $lineWordSpacing = (float) ($ctx['cellctx']['linewordspacing'] ?? 0.0);
+        $this->assertGreaterThan(0.0, $lineWordSpacing);
+
+        $bbox = $obj->getLastBBox();
+        $this->assertGreaterThan((float) $bbox['x'] + (float) $bbox['w'], $tpx);
+    }
+
+    public function testParseHTMLTextPlainJustifyDoesNotUseInlineCursorSpacingHack(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 10.0, 40.0, 0.0);
+
+        $html = '<div style="text-align:justify;">'
+            . 'Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett '
+            . 'Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango'
+            . '</div>';
+        $dom = $obj->exposeGetHTMLDOM($html);
+
+        $firstTextKey = null;
+        foreach ($dom as $key => $elm) {
+            if (!empty($elm['tag'])) {
+                continue;
+            }
+
+            if (\str_starts_with((string) $elm['value'], 'Alfa')) {
+                $firstTextKey = $key;
+                break;
+            }
+        }
+
+        $this->assertNotNull($firstTextKey);
+
+        $tpx = 10.0;
+        $tpy = 10.0;
+        $tpw = 40.0;
+        $tph = 0.0;
+
+        $out = $obj->exposeParseHTMLTextWithDom($dom, (int) $firstTextKey, $tpx, $tpy, $tpw, $tph);
+        $this->assertNotSame('', $out);
+
+        $ctx = $obj->exposeGetHTMLRenderContext();
+        $lineWordSpacing = (float) ($ctx['cellctx']['linewordspacing'] ?? 0.0);
+        $this->assertSame(0.0, $lineWordSpacing);
+    }
+
+    public function testGetHTMLCellMixedInlineJustifyKeepsUniformWordGaps(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeResetBBoxTrace();
+
+        $html = '<div style="text-align:justify;">'
+            . 'Alfa <i>Bravo</i> Charlie <i>Delta</i> Echo <i>Foxtrot</i> Golf <i>Hotel</i> '
+            . 'India <i>Juliett</i> Kilo <i>Lima</i> Mike <i>November</i> Oscar <i>Papa</i> '
+            . 'Quebec <i>Romeo</i> Sierra <i>Tango</i> Uniform <i>Victor</i> Whiskey <i>Xray</i> '
+            . 'Yankee <i>Zulu</i>'
+            . '</div>';
+
+        $out = $obj->getHTMLCell($html, 20.0, 10.0, 150.0, 0.0);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $line = [];
+        foreach ($trace as $row) {
+            if (\abs((float) $row['bbox_y'] - 10.0) < 0.001) {
+                $line[] = $row;
+            }
+        }
+
+        $this->assertGreaterThan(5, \count($line));
+
+        $gaps = [];
+        for ($idx = 1, $max = \count($line); $idx < $max; ++$idx) {
+            $prev = $line[$idx - 1];
+            $curr = $line[$idx];
+            $gap = (float) $curr['bbox_x'] - ((float) $prev['bbox_x'] + (float) $prev['bbox_w']);
+            $gaps[] = $gap;
+        }
+
+        $this->assertNotSame([], $gaps);
+        $expected = $gaps[0];
+        foreach ($gaps as $gap) {
+            $this->assertEqualsWithDelta($expected, $gap, 1e-6);
+        }
+    }
+
+    public function testParseHTMLTextForcedWrapTrimsLeadingSpaceAtNewLine(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->exposeInitHTMLCellContext(10.0, 10.0, 40.0, 0.0);
+        $obj->exposeResetBBoxTrace();
+
+        $elm = $this->makeHtmlNode([
+            'align' => 'J',
+            'value' => ' Quebec Romeo',
+        ]);
+
+        // Simulate a nearly full current line so parseHTMLText pre-wraps this fragment.
+        $tpx = 49.0;
+        $tpy = 10.0;
+        $tpw = 1.0;
+        $tph = 0.0;
+
+        $out = $obj->exposeParseHTMLText($elm, $tpx, $tpy, $tpw, $tph);
+        $this->assertNotSame('', $out);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotEmpty($trace);
+        $this->assertSame('Quebec Romeo', $trace[0]['txt']);
     }
 
     // --- Fix tests: base64 data URI images ---
