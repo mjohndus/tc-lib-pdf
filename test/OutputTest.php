@@ -480,39 +480,305 @@ PHP;
         $this->assertStringEndsWith(" >>\nendobj\n", $out);
     }
 
-    public function testTodoAnnotationSubtypeHelpersCurrentlyReturnEmptyString(): void
+    public function testPatternStreamResourcesKeepOnlyReferencedFontAndSpotAliases(): void
     {
         $obj = $this->getInternalTestObject();
-        /** @var array<string, mixed> $annot */
-        $annot = [];
+        $this->initFontAndPage($obj);
 
-        /** @var array<int, callable(TestableOutput): string> $todoSubtypeChecks */
-        $todoSubtypeChecks = [
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeLine($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeSquare($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeCircle($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypePolygon($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypePolyline($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeHighlight($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeUnderline($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeSquiggly($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeStrikeout($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeStamp($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeCaret($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeInk($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypePopup($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeMovie($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeScreen($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypePrintermark($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeRedact($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeTrapnet($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtypeWatermark($annot),
-            static fn (TestableOutput $outObj): string => $outObj->exposeGetOutAnnotationOptSubtype3D($annot),
-        ];
+        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
+        $font = $this->getObjectProperty($obj, 'font');
+        /** @var int $pon */
+        $pon = $this->getObjectProperty($obj, 'pon');
+        /** @var \Com\Tecnick\Pdf\Encrypt\Encrypt $encrypt */
+        $encrypt = $this->getObjectProperty($obj, 'encrypt');
 
-        foreach ($todoSubtypeChecks as $check) {
-            $this->assertSame('', $check($obj));
-        }
+        $timesfile = (string) \realpath(
+            __DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/core/times.json'
+        );
+        $font->insert($pon, 'times', '', 10, null, null, $timesfile);
+
+        $outfont = new \Com\Tecnick\Pdf\Font\Output($font->getFonts(), $pon, $encrypt);
+        $this->setObjectProperty($obj, 'outfont', $outfont);
+
+        /** @var \Com\Tecnick\Color\Pdf $color */
+        $color = $this->getObjectProperty($obj, 'color');
+        $this->setObjectProperty($color, 'spot_colors', [
+            'spotA' => ['i' => 1, 'n' => 111],
+            'spotB' => ['i' => 2, 'n' => 222],
+        ]);
+
+        $stream = '/F1 12 Tf /CS1 cs';
+        $out = $obj->exposeGetPatternStreamResourceDict($stream);
+
+        $this->assertStringContainsString(' /Font <<', $out);
+        $this->assertStringContainsString(' /F1 ', $out);
+        $this->assertStringNotContainsString(' /F2 ', $out);
+        $this->assertStringContainsString(' /ColorSpace <<', $out);
+        $this->assertStringContainsString(' /CS1 ', $out);
+        $this->assertStringNotContainsString(' /CS2 ', $out);
+    }
+
+    public function testPatternStreamResourcesFilterMixedCategoriesByStreamUsage(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
+        $font = $this->getObjectProperty($obj, 'font');
+        /** @var int $pon */
+        $pon = $this->getObjectProperty($obj, 'pon');
+        /** @var \Com\Tecnick\Pdf\Encrypt\Encrypt $encrypt */
+        $encrypt = $this->getObjectProperty($obj, 'encrypt');
+        /** @var \Com\Tecnick\Color\Pdf $color */
+        $color = $this->getObjectProperty($obj, 'color');
+        /** @var \Com\Tecnick\Pdf\Graph\Draw $graph */
+        $graph = $this->getObjectProperty($obj, 'graph');
+
+        $timesfile = (string) \realpath(
+            __DIR__ . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/core/times.json'
+        );
+        $font->insert($pon, 'times', '', 10, null, null, $timesfile);
+
+        $outfont = new \Com\Tecnick\Pdf\Font\Output($font->getFonts(), $pon, $encrypt);
+        $this->setObjectProperty($obj, 'outfont', $outfont);
+
+        $this->setObjectProperty($color, 'spot_colors', [
+            'spotA' => ['i' => 1, 'n' => 111],
+            'spotB' => ['i' => 2, 'n' => 222],
+        ]);
+
+        // Register at least two ExtGState entries so we can verify selective inclusion.
+        $graph->getAlpha(0.9);
+        $graph->getAlpha(0.5);
+
+        $this->setObjectProperty($obj, 'xobjects', [
+            'XO1' => ['n' => 201],
+            'XO2' => ['n' => 202],
+        ]);
+
+        $stream = '/F1 10 Tf /CS1 cs /GS2 gs /XO2 Do';
+        $out = $obj->exposeGetPatternStreamResourceDict($stream);
+
+        $this->assertStringContainsString(' /Font <<', $out);
+        $this->assertStringContainsString(' /F1 ', $out);
+        $this->assertStringNotContainsString(' /F2 ', $out);
+        $this->assertStringContainsString(' /ColorSpace <<', $out);
+        $this->assertStringContainsString(' /CS1 ', $out);
+        $this->assertStringNotContainsString(' /CS2 ', $out);
+        $this->assertStringContainsString(' /ExtGState <<', $out);
+        $this->assertStringContainsString(' /GS2 ', $out);
+        $this->assertStringNotContainsString(' /GS1 ', $out);
+        $this->assertStringContainsString(' /XObject <<', $out);
+        $this->assertStringContainsString(' /XO2 202 0 R', $out);
+        $this->assertStringNotContainsString(' /XO1 201 0 R', $out);
+    }
+
+    public function testImplementedAnnotationSubtypeHelpersReturnExpectedFragments(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $lineOut = $obj->exposeGetOutAnnotationOptSubtypeLine([
+            'opt' => [
+                'l' => [1.0, 2.0, 3.0, 4.0],
+                'le' => ['OpenArrow', 'ClosedArrow'],
+                'ic' => [0.1, 0.2, 0.3],
+                'cap' => true,
+                'it' => 'LineDimension',
+                'cp' => 'Inline',
+                'co' => [1.5, 2.5],
+            ],
+        ]);
+        $this->assertStringContainsString(' /L [', $lineOut);
+        $this->assertStringContainsString(' /LE [/OpenArrow /ClosedArrow]', $lineOut);
+        $this->assertStringContainsString(' /IC [0.100000 0.200000 0.300000]', $lineOut);
+        $this->assertStringContainsString(' /Cap true', $lineOut);
+        $this->assertStringContainsString(' /IT /LineDimension', $lineOut);
+        $this->assertStringContainsString(' /CP /Inline', $lineOut);
+        $this->assertStringContainsString(' /CO [', $lineOut);
+
+        $squareOut = $obj->exposeGetOutAnnotationOptSubtypeSquare([
+            'opt' => [
+                'ic' => [0.2, 0.3, 0.4],
+                'rd' => [1.0, 2.0, 3.0, 4.0],
+            ],
+        ]);
+        $this->assertStringContainsString(' /IC [0.200000 0.300000 0.400000]', $squareOut);
+        $this->assertStringContainsString(' /RD [', $squareOut);
+
+        $circleOut = $obj->exposeGetOutAnnotationOptSubtypeCircle([
+            'opt' => [
+                'ic' => [0.4, 0.5, 0.6],
+                'rd' => [1.0, 2.0, 3.0, 4.0],
+            ],
+        ]);
+        $this->assertStringContainsString(' /IC [0.400000 0.500000 0.600000]', $circleOut);
+        $this->assertStringContainsString(' /RD [', $circleOut);
+
+        $polygonOut = $obj->exposeGetOutAnnotationOptSubtypePolygon([
+            'opt' => [
+                'vertices' => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                'ic' => [0.1, 0.1, 0.1],
+                'it' => 'PolygonCloud',
+            ],
+        ]);
+        $this->assertStringContainsString(' /Vertices [', $polygonOut);
+        $this->assertStringContainsString(' /IC [0.100000 0.100000 0.100000]', $polygonOut);
+        $this->assertStringContainsString(' /IT /PolygonCloud', $polygonOut);
+
+        $polylineOut = $obj->exposeGetOutAnnotationOptSubtypePolyline([
+            'opt' => [
+                'vertices' => [1.0, 2.0, 3.0, 4.0],
+                'le' => ['Circle', 'Slash'],
+            ],
+        ]);
+        $this->assertStringContainsString(' /Vertices [', $polylineOut);
+        $this->assertStringContainsString(' /LE [/Circle /Slash]', $polylineOut);
+
+        $quad = [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]];
+        $this->assertStringContainsString(
+            ' /QuadPoints [',
+            $obj->exposeGetOutAnnotationOptSubtypeHighlight(['opt' => ['quadpoints' => $quad]])
+        );
+        $this->assertStringContainsString(
+            ' /QuadPoints [',
+            $obj->exposeGetOutAnnotationOptSubtypeUnderline(['opt' => ['quadpoints' => $quad]])
+        );
+        $this->assertStringContainsString(
+            ' /QuadPoints [',
+            $obj->exposeGetOutAnnotationOptSubtypeSquiggly(['opt' => ['quadpoints' => $quad]])
+        );
+        $this->assertStringContainsString(
+            ' /QuadPoints [',
+            $obj->exposeGetOutAnnotationOptSubtypeStrikeout(['opt' => ['quadpoints' => $quad]])
+        );
+
+        $stampOut = $obj->exposeGetOutAnnotationOptSubtypeStamp(['opt' => ['name' => 'Approved']]);
+        $this->assertSame(' /Name /Approved', $stampOut);
+
+        $caretOut = $obj->exposeGetOutAnnotationOptSubtypeCaret(['opt' => ['rd' => [1.0, 2.0, 3.0, 4.0], 'sy' => 'P']]);
+        $this->assertStringContainsString(' /RD [', $caretOut);
+        $this->assertStringContainsString(' /Sy /P', $caretOut);
+
+        $inkOut = $obj->exposeGetOutAnnotationOptSubtypeInk([
+            'opt' => [
+                'inklist' => [
+                    [1.0, 2.0, 3.0, 4.0],
+                    [5.0, 6.0, 7.0, 8.0],
+                ],
+            ],
+        ]);
+        $this->assertStringContainsString(' /InkList [[', $inkOut);
+
+        $popupOut = $obj->exposeGetOutAnnotationOptSubtypePopup(['opt' => ['parent' => ['n' => 9], 'open' => true]]);
+        $this->assertStringContainsString(' /Parent 9 0 R', $popupOut);
+        $this->assertStringContainsString(' /Open true', $popupOut);
+    }
+
+    public function testAdvancedAnnotationSubtypeHelpersReturnExpectedFragments(): void
+    {
+        $obj = $this->getInternalTestObject();
+
+        $movieOut = $obj->exposeGetOutAnnotationOptSubtypeMovie([
+            'n' => 11,
+            'opt' => [
+                't' => 'Movie title',
+                'movie' => [
+                    'f' => 'clip.mov',
+                    'aspect' => [16.0, 9.0],
+                    'rotate' => 90,
+                    'poster' => true,
+                ],
+                'a' => [
+                    'rate' => 1.25,
+                    'volume' => 0.8,
+                    'showcontrols' => true,
+                    'mode' => 'Repeat',
+                    'synchronous' => false,
+                ],
+            ],
+        ]);
+        $this->assertStringContainsString(' /T ', $movieOut);
+        $this->assertStringContainsString(' /Movie << /F ', $movieOut);
+        $this->assertStringContainsString(' /Aspect [16.000000 9.000000]', $movieOut);
+        $this->assertStringContainsString(' /Rotate 90', $movieOut);
+        $this->assertStringContainsString(' /Poster true', $movieOut);
+        $this->assertStringContainsString(' /A <<', $movieOut);
+        $this->assertStringContainsString(' /Rate 1.250000', $movieOut);
+        $this->assertStringContainsString(' /Volume 0.800000', $movieOut);
+        $this->assertStringContainsString(' /ShowControls true', $movieOut);
+        $this->assertStringContainsString(' /Mode /Repeat', $movieOut);
+        $this->assertStringContainsString(' /Synchronous false', $movieOut);
+
+        $screenOut = $obj->exposeGetOutAnnotationOptSubtypeScreen([
+            'n' => 12,
+            'opt' => [
+                't' => 'Screen title',
+                'mk' => [
+                    'r' => 180,
+                    'bc' => [0.1, 0.2, 0.3],
+                    'bg' => [0.7],
+                    'ca' => '(CA)',
+                    'rc' => '(RC)',
+                    'ac' => '(AC)',
+                    'tp' => 4,
+                ],
+                'a' => '/S /Named /N /NextPage',
+                'aa' => '/E << /S /Named /N /PrevPage >>',
+            ],
+        ]);
+        $this->assertStringContainsString(' /T ', $screenOut);
+        $this->assertStringContainsString(' /MK <<', $screenOut);
+        $this->assertStringContainsString(' /R 180', $screenOut);
+        $this->assertStringContainsString(' /BC [0.100000 0.200000 0.300000]', $screenOut);
+        $this->assertStringContainsString(' /BG [0.700000]', $screenOut);
+        $this->assertStringContainsString(' /TP 4', $screenOut);
+        $this->assertStringContainsString(' /A << /S /Named /N /NextPage >>', $screenOut);
+        $this->assertStringContainsString(' /AA << /E << /S /Named /N /PrevPage >> >>', $screenOut);
+
+        $redactOut = $obj->exposeGetOutAnnotationOptSubtypeRedact([
+            'n' => 13,
+            'opt' => [
+                'quadpoints' => [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]],
+                'ic' => [0.0, 0.0, 0.0],
+                'overlaytext' => 'REDACTED',
+                'repeat' => true,
+                'da' => '/F1 10 Tf',
+                'q' => 2,
+            ],
+        ]);
+        $this->assertStringContainsString(' /QuadPoints [', $redactOut);
+        $this->assertStringContainsString(' /IC [0.000000 0.000000 0.000000]', $redactOut);
+        $this->assertStringContainsString(' /OverlayText ', $redactOut);
+        $this->assertStringContainsString(' /Repeat true', $redactOut);
+        $this->assertStringContainsString(' /DA ', $redactOut);
+        $this->assertStringContainsString(' /Q 2', $redactOut);
+
+        $watermarkOut = $obj->exposeGetOutAnnotationOptSubtypeWatermark([
+            'opt' => [
+                'fixedprint' => [
+                    'type' => 'FixedPrint',
+                    'matrix' => [1.0, 0.0, 0.0, 1.0, 10.0, 20.0],
+                    'h' => 0.25,
+                    'v' => 0.75,
+                ],
+            ],
+        ]);
+        $this->assertStringContainsString(' /FixedPrint <<', $watermarkOut);
+        $this->assertStringContainsString(' /Type /FixedPrint', $watermarkOut);
+        $this->assertStringContainsString(
+            ' /Matrix [1.000000 0.000000 0.000000 1.000000 10.000000 20.000000]',
+            $watermarkOut
+        );
+        $this->assertStringContainsString(' /H 0.250000', $watermarkOut);
+        $this->assertStringContainsString(' /V 0.750000', $watermarkOut);
+    }
+
+    public function testIntentionallyUnsupportedAdvancedSubtypeHelpersReturnEmptyString(): void
+    {
+        $obj = $this->getInternalTestObject();
+
+        $this->assertSame('', $obj->exposeGetOutAnnotationOptSubtypePrintermark([]));
+        $this->assertSame('', $obj->exposeGetOutAnnotationOptSubtypeTrapnet([]));
+        $this->assertSame('', $obj->exposeGetOutAnnotationOptSubtype3D([]));
     }
 
     public function testGetAnnotationRadioButtonsReturnsEmptyWhenNoKids(): void
@@ -3429,5 +3695,98 @@ PHP;
     private function setPdfaModeOnObject(TestableOutput $obj, int $pdfa): void
     {
         $obj->setPdfaMode($pdfa);
+    }
+
+    // -------------------------------------------------------------------------
+    // E-4 SVG mask PDF output tests
+    // -------------------------------------------------------------------------
+
+    /**
+     * getOutSVGMasks emits Form XObject + SMask + ExtGState for a registered mask
+     * and records the ExtGState object number in gs_n.
+     */
+    public function testGetOutSVGMasksEmitsThreePdfObjectsAndSetsGsN(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->setSvgMasks([
+            'MSK_AABBCCDD' => [
+                'id'     => 'MSK_AABBCCDD',
+                'stream' => 'q Q',
+                'bbox'   => [0.0, 0.0, 595.0, 841.0],
+                'gs_n'   => 0,
+            ],
+        ]);
+
+        $out = $obj->exposeGetOutSVGMasks();
+
+        // Three PDF objects emitted.
+        $this->assertSame(3, \substr_count($out, 'endobj'));
+
+        // Form XObject.
+        $this->assertStringContainsString('/Type /XObject', $out);
+        $this->assertStringContainsString('/Subtype /Form', $out);
+        $this->assertStringContainsString('/Group <<', $out);
+        $this->assertStringContainsString('/CS /DeviceGray', $out);
+
+        // SMask dict.
+        $this->assertStringContainsString('/Type /Mask', $out);
+        $this->assertStringContainsString('/S /Luminosity', $out);
+
+        // ExtGState.
+        $this->assertStringContainsString('/Type /ExtGState', $out);
+        $this->assertStringContainsString('/SMask', $out);
+        $this->assertStringContainsString('/AIS false', $out);
+
+        // gs_n must be set to the ExtGState object number.
+        $masks = $obj->getSvgMasks();
+        $this->assertArrayHasKey('MSK_AABBCCDD', $masks);
+        $this->assertIsArray($masks['MSK_AABBCCDD']);
+        $mask = $masks['MSK_AABBCCDD'];
+        $this->assertArrayHasKey('gs_n', $mask);
+        $this->assertGreaterThan(0, $mask['gs_n']);
+    }
+
+    /**
+     * getSVGMaskExtGStateEntries returns an entry for each mask with gs_n > 0.
+     */
+    public function testGetSVGMaskExtGStateEntriesReturnsResourceEntries(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->setSvgMasks([
+            'MSK_AA' => ['id' => 'MSK_AA', 'stream' => 'q Q', 'bbox' => [0.0, 0.0, 1.0, 1.0], 'gs_n' => 42],
+            'MSK_BB' => ['id' => 'MSK_BB', 'stream' => 'q Q', 'bbox' => [0.0, 0.0, 1.0, 1.0], 'gs_n' => 0],
+        ]);
+
+        $entries = $obj->exposeGetSVGMaskExtGStateEntries();
+
+        $this->assertStringContainsString('/MSK_AA 42 0 R', $entries);
+        $this->assertStringNotContainsString('/MSK_BB', $entries);
+    }
+
+    /**
+     * getOutSVGMasks skips masks with empty streams.
+     */
+    public function testGetOutSVGMasksSkipsEmptyStreamMasks(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $obj->setSvgMasks([
+            'MSK_EMPTY' => ['id' => 'MSK_EMPTY', 'stream' => '', 'bbox' => [0.0, 0.0, 1.0, 1.0], 'gs_n' => 0],
+        ]);
+
+        $out = $obj->exposeGetOutSVGMasks();
+
+        $this->assertSame('', $out);
+        $masks = $obj->getSvgMasks();
+        $this->assertArrayHasKey('MSK_EMPTY', $masks);
+        $this->assertIsArray($masks['MSK_EMPTY']);
+        $mask = $masks['MSK_EMPTY'];
+        $this->assertArrayHasKey('gs_n', $mask);
+        $this->assertSame(0, $mask['gs_n']);
     }
 }

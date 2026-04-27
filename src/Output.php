@@ -358,6 +358,23 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *         'gheight': float,
  *     }
  *
+ * @phpstan-type TPatternObject array{
+ *         'id': string,
+ *         'n': int,
+ *         'outdata': string,
+ *         'bbox': array{float, float, float, float},
+ *         'xstep': float,
+ *         'ystep': float,
+ *         'matrix': array{float, float, float, float, float, float},
+ *     }
+ *
+ * @phpstan-type TSVGMaskObject array{
+ *         'id': string,
+ *         'stream': string,
+ *         'bbox': array{float, float, float, float},
+ *         'gs_n': int,
+ *     }
+ *
  * @phpstan-type TOutline array{
  *         't': string,
  *         'u': string,
@@ -607,6 +624,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $out .= $this->graph->getOutGradientShaders($this->pon);
         $this->pon = $this->graph->getObjectNumber();
         $out .= $this->getOutXObjects();
+        $out .= $this->getOutPatterns();
+        $out .= $this->getOutSVGMasks();
         $out .= $this->getOutResourcesDict();
         $out .= $this->getOutDestinations();
         $out .= $this->getOutEmbeddedFiles();
@@ -1176,17 +1195,301 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
     protected function getOutResourcesDict(): string
     {
         $this->objid['resdic'] = $this->page->getResourceDictObjID();
+        // Merge SVG mask ExtGState entries into the /ExtGState resource dict.
+        $gsResources    = $this->graph->getOutExtGStateResources();
+        $maskGsEntries  = $this->getSVGMaskExtGStateEntries();
+        if ($maskGsEntries !== '') {
+            if ($gsResources === '') {
+                $gsResources = ' /ExtGState <<' . $maskGsEntries . ' >>' . "\n";
+            } else {
+                // Strip closing ' >>\n' and re-append with mask entries.
+                $gsResources = \substr(\rtrim($gsResources), 0, -2) . $maskGsEntries . ' >>' . "\n";
+            }
+        }
+
         return $this->objid['resdic'] . ' 0 obj' . "\n"
             . '<<'
             . ' /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]'
             . $this->outfont->getOutFontDict()
             . $this->getXObjectDict()
+            . $this->getPatternDict()
             . $this->getLayerDict()
-            . $this->graph->getOutExtGStateResources()
+            . $gsResources
             . $this->graph->getOutGradientResources()
             . $this->color->getPdfSpotResources()
             . ' >>' . "\n"
             . 'endobj' . "\n";
+    }
+
+    /**
+     * Returns the PDF Pattern objects entry.
+     */
+    protected function getOutPatterns(): string
+    {
+        $out = '';
+        foreach ($this->patterns as $pid => $data) {
+            if (empty($data['outdata'])) {
+                continue;
+            }
+
+            if (empty($this->patterns[$pid]['n'])) {
+                $this->patterns[$pid]['n'] = ++$this->pon;
+            }
+
+            $oid = $this->patterns[$pid]['n'];
+            $stream = \trim($data['outdata']);
+            $out .= $oid . ' 0 obj' . "\n"
+                . '<<'
+                . ' /Type /Pattern'
+                . ' /PatternType 1'
+                . ' /PaintType 1'
+                . ' /TilingType 1'
+                . \sprintf(
+                    ' /BBox [%F %F %F %F]',
+                    $data['bbox'][0],
+                    $data['bbox'][1],
+                    $data['bbox'][2],
+                    $data['bbox'][3],
+                )
+                . ' /XStep ' . \sprintf('%F', $data['xstep'])
+                . ' /YStep ' . \sprintf('%F', $data['ystep'])
+                . \sprintf(
+                    ' /Matrix [%F %F %F %F %F %F]',
+                    $data['matrix'][0],
+                    $data['matrix'][1],
+                    $data['matrix'][2],
+                    $data['matrix'][3],
+                    $data['matrix'][4],
+                    $data['matrix'][5],
+                );
+            $res = $this->getPatternStreamResourceDict($stream);
+            $out .= ' /Resources <<'
+                . ' /ProcSet [/PDF /Text /ImageB /ImageC /ImageI]'
+                . $res
+                . ' >>';
+
+            if ($this->compress) {
+                $stream = \gzcompress($stream);
+                if ($stream === false) {
+                    throw new PdfException('Unable to compress stream');
+                }
+                $out .= ' /Filter /FlateDecode';
+            }
+
+            $stream = $this->encrypt->encryptString($stream, $oid);
+            $out .= ' /Length ' . \strlen($stream)
+                . ' >>'
+                . ' stream' . "\n"
+                . $stream . "\n"
+                . 'endstream' . "\n"
+                . 'endobj' . "\n";
+        }
+
+        return $out;
+    }
+
+    /**
+     * Returns the PDF Form XObject + SMask + ExtGState objects for SVG masks.
+     *
+     * Each registered SVG mask produces three chained PDF objects:
+     *  1. A Form XObject with a DeviceGray transparency group containing the
+     *     mask shape stream.
+     *  2. A Mask dict pointing at that Form XObject (Luminosity mode).
+     *  3. An ExtGState with /SMask referencing the Mask dict.
+     *
+     * After emission the gs_n for each mask is set so that
+     * getSVGMaskExtGStateEntries() can include them in the resources dict.
+     *
+     * @return string Raw PDF objects.
+     */
+    protected function getOutSVGMasks(): string
+    {
+        $out = '';
+        foreach ($this->svgmasks as $key => $data) {
+            if (empty($data['stream'])) {
+                continue;
+            }
+
+            $stream  = $data['stream'];
+            $bbox    = $data['bbox'];
+            $bboxStr = \sprintf('%F %F %F %F', $bbox[0], $bbox[1], $bbox[2], $bbox[3]);
+
+            // Form XObject (DeviceGray transparency group for luminosity mask).
+            $formOid    = ++$this->pon;
+            $formStream = $stream;
+            $formHead   = $formOid . ' 0 obj' . "\n"
+                . '<<'
+                . ' /Type /XObject'
+                . ' /Subtype /Form'
+                . ' /FormType 1'
+                . ' /BBox [' . $bboxStr . ']'
+                . ' /Group << /Type /Group /S /Transparency /CS /DeviceGray /I true >>';
+            if ($this->compress) {
+                $comp = \gzcompress($formStream);
+                if ($comp !== false) {
+                    $formStream = $comp;
+                    $formHead  .= ' /Filter /FlateDecode';
+                }
+            }
+
+            $formStream = $this->encrypt->encryptString($formStream, $formOid);
+            $out .= $formHead
+                . ' /Length ' . \strlen($formStream)
+                . ' >>' . "\n"
+                . 'stream' . "\n"
+                . $formStream . "\n"
+                . 'endstream' . "\n"
+                . 'endobj' . "\n";
+
+            // SMask dictionary.
+            $smaskOid = ++$this->pon;
+            $out .= $smaskOid . ' 0 obj' . "\n"
+                . '<< /Type /Mask /S /Luminosity /G ' . $formOid . ' 0 R >>' . "\n"
+                . 'endobj' . "\n";
+
+            // ExtGState with SMask reference.
+            $gsOid = ++$this->pon;
+            $out .= $gsOid . ' 0 obj' . "\n"
+                . '<< /Type /ExtGState /SMask ' . $smaskOid . ' 0 R /AIS false >>' . "\n"
+                . 'endobj' . "\n";
+
+            $this->svgmasks[$key]['gs_n'] = $gsOid;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Returns ExtGState resource-dict entries for SVG masks.
+     *
+     * Returns a string like " /MSK_xxx N 0 R /MSK_yyy M 0 R" for inclusion
+     * inside the page /ExtGState resource dictionary.
+     *
+     * @return string
+     */
+    protected function getSVGMaskExtGStateEntries(): string
+    {
+        $out = '';
+        foreach ($this->svgmasks as $key => $mask) {
+            if ($mask['gs_n'] > 0) {
+                $out .= ' /' . $key . ' ' . $mask['gs_n'] . ' 0 R';
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build a minimized resources dictionary fragment for a pattern stream.
+     */
+    protected function getPatternStreamResourceDict(string $stream): string
+    {
+        $fontNames = [];
+        if (\preg_match_all('/\/(F[0-9]+)\s+[0-9\.\-]+\s+Tf\b/', $stream, $matchFont) > 0) {
+            foreach ($matchFont[1] as $name) {
+                $fontNames[$name] = true;
+            }
+        }
+
+        $extgstate = [];
+        if (\preg_match_all('/\/GS([0-9]+)\s+gs\b/', $stream, $matchGs) > 0) {
+            foreach ($matchGs[1] as $idx) {
+                $extgstate[(int) $idx] = true;
+            }
+        }
+
+        $gradient = [];
+        if (\preg_match_all('/\/Sh([0-9]+)\s+sh\b/', $stream, $matchSh) > 0) {
+            foreach ($matchSh[1] as $idx) {
+                $gradient[(int) $idx] = true;
+            }
+        }
+
+        $spotNames = [];
+        if (\preg_match_all('/\/(CS[0-9]+)\s+[cC]s\b/', $stream, $matchCs) > 0) {
+            foreach ($matchCs[1] as $name) {
+                $spotNames[$name] = true;
+            }
+        }
+
+        $imageKeys = [];
+        $xobjectKeys = [];
+        if (\preg_match_all('/\/([A-Za-z0-9_]+)\s+Do\b/', $stream, $matchDo) > 0) {
+            foreach ($matchDo[1] as $key) {
+                if (\preg_match('/^I([0-9]+)$/', $key, $imgm) === 1) {
+                    $imageKeys[(int) $imgm[1]] = true;
+                    continue;
+                }
+                if (isset($this->xobjects[$key])) {
+                    $xobjectKeys[$key] = true;
+                }
+            }
+        }
+
+        $out = '';
+        if (!empty($fontNames)) {
+            $fontEntries = $this->extractNamedResourceRefs($this->outfont->getOutFontDict(), \array_keys($fontNames));
+            if ($fontEntries !== '') {
+                $out .= ' /Font <<' . $fontEntries . ' >>';
+            }
+        }
+        if (!empty($extgstate)) {
+            $out .= $this->graph->getOutExtGStateResourcesByKeys(\array_map('intval', \array_keys($extgstate)));
+        }
+        if (!empty($gradient)) {
+            $out .= $this->graph->getOutGradientResourcesByKeys(\array_map('intval', \array_keys($gradient)));
+        }
+        if (!empty($spotNames)) {
+            $spotEntries = $this->extractNamedResourceRefs(
+                $this->color->getPdfSpotResources(),
+                \array_keys($spotNames),
+            );
+            if ($spotEntries !== '') {
+                $out .= ' /ColorSpace <<' . $spotEntries . ' >>';
+            }
+        }
+        if (!empty($imageKeys) || !empty($xobjectKeys)) {
+            $out .= ' /XObject <<';
+            if (!empty($imageKeys)) {
+                $out .= $this->image->getXobjectDictByKeys(\array_map('intval', \array_keys($imageKeys)));
+            }
+            if (!empty($xobjectKeys)) {
+                foreach (\array_keys($xobjectKeys) as $xid) {
+                    $out .= ' /' . $xid . ' ' . $this->xobjects[$xid]['n'] . ' 0 R';
+                }
+            }
+            $out .= ' >>';
+        }
+
+        return $out;
+    }
+
+    /**
+     * Extract named object references from a resource dictionary fragment.
+     *
+     * @param string $dict Full dictionary fragment (e.g. '/Font << /F1 1 0 R >>').
+     * @param array<string> $names Resource names to retain.
+     */
+    protected function extractNamedResourceRefs(string $dict, array $names): string
+    {
+        if (($dict === '') || empty($names)) {
+            return '';
+        }
+
+        $out = '';
+        foreach ($names as $name) {
+            if (!\is_string($name) || ($name === '')) {
+                continue;
+            }
+
+            $match = [];
+            $ok = \preg_match('/\/' . \preg_quote($name, '/') . '\s+([0-9]+)\s+0\s+R\b/', $dict, $match);
+            if (($ok === 1) && isset($match[1])) {
+                $out .= ' /' . $name . ' ' . (int) $match[1] . ' 0 R';
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -2159,14 +2462,214 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function getAnnotationLineEndingStyles(): array
+    {
+        return [
+            'Square',
+            'Circle',
+            'Diamond',
+            'OpenArrow',
+            'ClosedArrow',
+            'None',
+            'Butt',
+            'ROpenArrow',
+            'RClosedArrow',
+            'Slash',
+        ];
+    }
+
+    /**
+     * @param array<mixed> $values
+     */
+    protected function getOutAnnotationPointsArray(array $values, int $minValues = 0, int $groupMultiple = 0): string
+    {
+        $coords = [];
+        foreach ($values as $val) {
+            if (! \is_numeric($val)) {
+                continue;
+            }
+
+            $coords[] = \sprintf('%F', $this->toPoints((float) $val));
+        }
+
+        if ((\count($coords) < $minValues) || (($groupMultiple > 0) && ((\count($coords) % $groupMultiple) !== 0))) {
+            return '';
+        }
+
+        return '[' . \implode(' ', $coords) . ']';
+    }
+
+    /**
+     * @param array<string, mixed> $annot
+     */
+    protected function getOutAnnotationRectDifferences(array $annot): string
+    {
+        $opt = $annot['opt'] ?? null;
+        if (
+            ! \is_array($opt)
+            || ! isset($opt['rd'])
+            || ! \is_array($opt['rd'])
+            || (\count($opt['rd']) !== 4)
+            || ! \is_numeric($opt['rd'][0])
+            || ! \is_numeric($opt['rd'][1])
+            || ! \is_numeric($opt['rd'][2])
+            || ! \is_numeric($opt['rd'][3])
+        ) {
+            return '';
+        }
+
+        $out = $this->getOutAnnotationPointsArray($opt['rd'], 4, 4);
+        if ($out === '') {
+            return '';
+        }
+
+        return ' /RD ' . $out;
+    }
+
+    /**
+     * @param array<string, mixed> $annot
+     */
+    protected function getOutAnnotationInteriorColor(array $annot): string
+    {
+        $opt = $annot['opt'] ?? null;
+        if (! \is_array($opt) || ! isset($opt['ic']) || ! \is_array($opt['ic'])) {
+            return '';
+        }
+
+        return ' /IC ' . static::getColorStringFromPercArray($opt['ic']); // @phpstan-ignore argument.type
+    }
+
+    /**
+     * @param array<string, mixed> $annot
+     */
+    protected function getOutAnnotationLineEndings(array $annot): string
+    {
+        $opt = $annot['opt'] ?? null;
+        if (! \is_array($opt) || ! isset($opt['le']) || ! \is_array($opt['le']) || (\count($opt['le']) !== 2)) {
+            return '';
+        }
+
+        if (! \is_string($opt['le'][0]) || ! \is_string($opt['le'][1])) {
+            return '';
+        }
+
+        $styles = $this->getAnnotationLineEndingStyles();
+        if (! \in_array($opt['le'][0], $styles) || ! \in_array($opt['le'][1], $styles)) {
+            return '';
+        }
+
+        return ' /LE [/' . $opt['le'][0] . ' /' . $opt['le'][1] . ']';
+    }
+
+    /**
+     * @param array<string, mixed> $annot
+     */
+    protected function getOutAnnotationQuadPoints(array $annot): string
+    {
+        $opt = $annot['opt'] ?? null;
+        if (! \is_array($opt) || ! isset($opt['quadpoints']) || ! \is_array($opt['quadpoints'])) {
+            return '';
+        }
+
+        $quad = [];
+        foreach ($opt['quadpoints'] as $pointset) {
+            if (! \is_array($pointset)) {
+                continue;
+            }
+
+            $coords = $this->getOutAnnotationPointsArray($pointset, 8, 8);
+            if ($coords === '') {
+                continue;
+            }
+
+            $quad[] = \substr($coords, 1, -1);
+        }
+
+        if (empty($quad)) {
+            return '';
+        }
+
+        return ' /QuadPoints [' . \implode(' ', $quad) . ']';
+    }
+
+    /**
      * Returns the output code associated with the annotation opt.subtype.line.
      *
      * @param TAnnot $annot Array containing page annotations.
      */
     protected function getOutAnnotationOptSubtypeLine(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = '';
+
+        if (isset($annot['opt']['l']) && \is_array($annot['opt']['l'])) {
+            $line = $this->getOutAnnotationPointsArray($annot['opt']['l'], 4, 4);
+            if ($line !== '') {
+                $out .= ' /L ' . $line;
+            }
+        }
+
+        $out .= $this->getOutAnnotationLineEndings($annot);
+        $out .= $this->getOutAnnotationInteriorColor($annot);
+
+        if (isset($annot['opt']['ll']) && \is_numeric($annot['opt']['ll'])) {
+            $out .= ' /LL ' . \sprintf('%F', (float) $annot['opt']['ll']);
+        }
+
+        if (isset($annot['opt']['lle']) && \is_numeric($annot['opt']['lle'])) {
+            $out .= ' /LLE ' . \sprintf('%F', (float) $annot['opt']['lle']);
+        }
+
+        if (isset($annot['opt']['cap']) && \is_bool($annot['opt']['cap'])) {
+            $out .= ' /Cap ' . ($annot['opt']['cap'] ? 'true' : 'false');
+        }
+
+        $lineIntents = ['LineArrow', 'LineDimension'];
+        if (
+            isset($annot['opt']['it'])
+            && \is_string($annot['opt']['it'])
+            && \in_array($annot['opt']['it'], $lineIntents)
+        ) {
+            $out .= ' /IT /' . $annot['opt']['it'];
+        }
+
+        if (isset($annot['opt']['llo']) && \is_numeric($annot['opt']['llo'])) {
+            $out .= ' /LLO ' . \sprintf('%F', (float) $annot['opt']['llo']);
+        }
+
+        $captionPos = ['Inline', 'Top'];
+        if (
+            isset($annot['opt']['cp'])
+            && \is_string($annot['opt']['cp'])
+            && \in_array($annot['opt']['cp'], $captionPos)
+        ) {
+            $out .= ' /CP /' . $annot['opt']['cp'];
+        }
+
+        if (isset($annot['opt']['measure']) && \is_array($annot['opt']['measure'])) {
+            $measure = '';
+            if (isset($annot['opt']['measure']['type']) && \is_string($annot['opt']['measure']['type'])) {
+                $measure .= ' /Type /' . $annot['opt']['measure']['type'];
+            }
+
+            if (isset($annot['opt']['measure']['subtype']) && \is_string($annot['opt']['measure']['subtype'])) {
+                $measure .= ' /Subtype /' . $annot['opt']['measure']['subtype'];
+            }
+
+            if ($measure !== '') {
+                $out .= ' /Measure <<' . $measure . ' >>';
+            }
+        }
+
+        if (isset($annot['opt']['co']) && \is_array($annot['opt']['co'])) {
+            $co = $this->getOutAnnotationPointsArray($annot['opt']['co'], 2, 2);
+            if ($co !== '') {
+                $out .= ' /CO ' . $co;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -2176,8 +2679,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeSquare(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationInteriorColor($annot)
+            . $this->getOutAnnotationRectDifferences($annot);
     }
 
     /**
@@ -2187,8 +2690,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeCircle(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationInteriorColor($annot)
+            . $this->getOutAnnotationRectDifferences($annot);
     }
 
     /**
@@ -2198,8 +2701,41 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypePolygon(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = '';
+        if (isset($annot['opt']['vertices']) && \is_array($annot['opt']['vertices'])) {
+            $vertices = $this->getOutAnnotationPointsArray($annot['opt']['vertices'], 4, 2);
+            if ($vertices !== '') {
+                $out .= ' /Vertices ' . $vertices;
+            }
+        }
+
+        $out .= $this->getOutAnnotationInteriorColor($annot);
+
+        $polyIntents = ['PolygonCloud', 'PolyLineDimension'];
+        if (
+            isset($annot['opt']['it'])
+            && \is_string($annot['opt']['it'])
+            && \in_array($annot['opt']['it'], $polyIntents)
+        ) {
+            $out .= ' /IT /' . $annot['opt']['it'];
+        }
+
+        if (isset($annot['opt']['measure']) && \is_array($annot['opt']['measure'])) {
+            $measure = '';
+            if (isset($annot['opt']['measure']['type']) && \is_string($annot['opt']['measure']['type'])) {
+                $measure .= ' /Type /' . $annot['opt']['measure']['type'];
+            }
+
+            if (isset($annot['opt']['measure']['subtype']) && \is_string($annot['opt']['measure']['subtype'])) {
+                $measure .= ' /Subtype /' . $annot['opt']['measure']['subtype'];
+            }
+
+            if ($measure !== '') {
+                $out .= ' /Measure <<' . $measure . ' >>';
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -2209,8 +2745,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypePolyline(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationOptSubtypePolygon($annot)
+            . $this->getOutAnnotationLineEndings($annot);
     }
 
     /**
@@ -2220,8 +2756,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeHighlight(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationQuadPoints($annot);
     }
 
     /**
@@ -2231,8 +2766,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeUnderline(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationQuadPoints($annot);
     }
 
     /**
@@ -2242,8 +2776,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeSquiggly(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationQuadPoints($annot);
     }
 
     /**
@@ -2253,8 +2786,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeStrikeout(array $annot): string
     {
-        // @TODO
-        return '';
+        return $this->getOutAnnotationQuadPoints($annot);
     }
 
     /**
@@ -2264,8 +2796,32 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeStamp(array $annot): string
     {
-        // @TODO
-        return '';
+        $icons = [
+            'Approved',
+            'AsIs',
+            'Confidential',
+            'Departmental',
+            'Draft',
+            'Experimental',
+            'Expired',
+            'Final',
+            'ForComment',
+            'ForPublicRelease',
+            'NotApproved',
+            'NotForPublicRelease',
+            'Sold',
+            'TopSecret',
+        ];
+
+        if (
+            isset($annot['opt']['name'])
+            && \is_string($annot['opt']['name'])
+            && \in_array($annot['opt']['name'], $icons)
+        ) {
+            return ' /Name /' . $annot['opt']['name'];
+        }
+
+        return ' /Name /Draft';
     }
 
     /**
@@ -2275,8 +2831,13 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeCaret(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = $this->getOutAnnotationRectDifferences($annot);
+        $symbols = ['P', 'None'];
+        if (isset($annot['opt']['sy']) && \is_string($annot['opt']['sy']) && \in_array($annot['opt']['sy'], $symbols)) {
+            $out .= ' /Sy /' . $annot['opt']['sy'];
+        }
+
+        return $out;
     }
 
     /**
@@ -2286,8 +2847,29 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeInk(array $annot): string
     {
-        // @TODO
-        return '';
+        if (! isset($annot['opt']['inklist']) || ! \is_array($annot['opt']['inklist'])) {
+            return '';
+        }
+
+        $paths = [];
+        foreach ($annot['opt']['inklist'] as $line) {
+            if (! \is_array($line)) {
+                continue;
+            }
+
+            $path = $this->getOutAnnotationPointsArray($line, 4, 2);
+            if ($path === '') {
+                continue;
+            }
+
+            $paths[] = $path;
+        }
+
+        if (empty($paths)) {
+            return '';
+        }
+
+        return ' /InkList [' . \implode(' ', $paths) . ']';
     }
 
     /**
@@ -2297,8 +2879,22 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypePopup(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = '';
+
+        if (
+            isset($annot['opt']['parent'])
+            && \is_array($annot['opt']['parent'])
+            && isset($annot['opt']['parent']['n'])
+            && \is_numeric($annot['opt']['parent']['n'])
+        ) {
+            $out .= ' /Parent ' . (int) $annot['opt']['parent']['n'] . ' 0 R';
+        }
+
+        if (isset($annot['opt']['open']) && \is_bool($annot['opt']['open'])) {
+            $out .= ' /Open ' . ($annot['opt']['open'] ? 'true' : 'false');
+        }
+
+        return $out;
     }
 
     /**
@@ -2351,8 +2947,8 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             return '';
         }
 
-        // ... TO BE COMPLETED ...
-        // /R /C /B /E /CO /CP
+        // Limited support: currently writes sound file reference and icon name.
+        // Extended sound parameters (R, C, B, E, CO, CP) are intentionally not serialized yet.
         $out = ' /Sound ' . $this->embeddedfiles[$filename]['f'] . ' 0 R';
         $iconsapp = ['Speaker', 'Mic'];
         if (isset($annot['opt']['name']) && \in_array($annot['opt']['name'], $iconsapp)) {
@@ -2371,8 +2967,170 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeMovie(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = '';
+
+        if (! empty($annot['opt']['t']) && \is_string($annot['opt']['t'])) {
+            $out .= ' /T ' . $this->getOutTextString($annot['opt']['t'], $annot['n'], true);
+        }
+
+        if (isset($annot['opt']['movie']) && \is_array($annot['opt']['movie'])) {
+            $movie = '';
+            if (! empty($annot['opt']['movie']['f']) && \is_string($annot['opt']['movie']['f'])) {
+                $movie .= ' /F ' . $this->encrypt->escapeDataString($annot['opt']['movie']['f'], $annot['n']);
+            }
+
+            if (
+                isset($annot['opt']['movie']['aspect'])
+                && \is_array($annot['opt']['movie']['aspect'])
+                && (\count($annot['opt']['movie']['aspect']) === 2)
+                && \is_numeric($annot['opt']['movie']['aspect'][0])
+                && \is_numeric($annot['opt']['movie']['aspect'][1])
+            ) {
+                $movie .= \sprintf(
+                    ' /Aspect [%F %F]',
+                    (float) $annot['opt']['movie']['aspect'][0],
+                    (float) $annot['opt']['movie']['aspect'][1]
+                );
+            }
+
+            if (isset($annot['opt']['movie']['rotate']) && \is_numeric($annot['opt']['movie']['rotate'])) {
+                $movie .= ' /Rotate ' . (int) $annot['opt']['movie']['rotate'];
+            }
+
+            if (isset($annot['opt']['movie']['poster'])) {
+                if (\is_bool($annot['opt']['movie']['poster'])) {
+                    $movie .= ' /Poster ' . ($annot['opt']['movie']['poster'] ? 'true' : 'false');
+                } elseif (\is_string($annot['opt']['movie']['poster'])) {
+                    $movie .= ' /Poster ' . $this->encrypt->escapeDataString(
+                        $annot['opt']['movie']['poster'],
+                        $annot['n']
+                    );
+                }
+            }
+
+            if ($movie !== '') {
+                $out .= ' /Movie <<' . $movie . ' >>';
+            }
+        }
+
+        if (isset($annot['opt']['a'])) {
+            if (\is_bool($annot['opt']['a'])) {
+                $out .= ' /A ' . ($annot['opt']['a'] ? 'true' : 'false');
+            } elseif (\is_array($annot['opt']['a'])) {
+                $action = '';
+
+                if (isset($annot['opt']['a']['start'])) {
+                    if (\is_numeric($annot['opt']['a']['start'])) {
+                        $action .= ' /Start ' . (int) $annot['opt']['a']['start'];
+                    } elseif (\is_string($annot['opt']['a']['start'])) {
+                        $action .= ' /Start ' . $this->encrypt->escapeDataString(
+                            $annot['opt']['a']['start'],
+                            $annot['n']
+                        );
+                    } elseif (
+                        \is_array($annot['opt']['a']['start'])
+                        && (\count($annot['opt']['a']['start']) === 2)
+                        && (\is_numeric($annot['opt']['a']['start'][0]) || \is_string($annot['opt']['a']['start'][0]))
+                        && \is_numeric($annot['opt']['a']['start'][1])
+                    ) {
+                        $action .= ' /Start [';
+                        if (\is_numeric($annot['opt']['a']['start'][0])) {
+                            $action .= (string) (int) $annot['opt']['a']['start'][0];
+                        } else {
+                            $action .= $this->encrypt->escapeDataString($annot['opt']['a']['start'][0], $annot['n']);
+                        }
+
+                        $action .= ' ' . (int) $annot['opt']['a']['start'][1] . ']';
+                    }
+                }
+
+                if (isset($annot['opt']['a']['duration'])) {
+                    if (\is_numeric($annot['opt']['a']['duration'])) {
+                        $action .= ' /Duration ' . (int) $annot['opt']['a']['duration'];
+                    } elseif (\is_string($annot['opt']['a']['duration'])) {
+                        $action .= ' /Duration ' . $this->encrypt->escapeDataString(
+                            $annot['opt']['a']['duration'],
+                            $annot['n']
+                        );
+                    } elseif (
+                        \is_array($annot['opt']['a']['duration'])
+                        && (\count($annot['opt']['a']['duration']) === 2)
+                        && (
+                            \is_numeric($annot['opt']['a']['duration'][0])
+                            || \is_string($annot['opt']['a']['duration'][0])
+                        )
+                        && \is_numeric($annot['opt']['a']['duration'][1])
+                    ) {
+                        $action .= ' /Duration [';
+                        if (\is_numeric($annot['opt']['a']['duration'][0])) {
+                            $action .= (string) (int) $annot['opt']['a']['duration'][0];
+                        } else {
+                            $action .= $this->encrypt->escapeDataString($annot['opt']['a']['duration'][0], $annot['n']);
+                        }
+
+                        $action .= ' ' . (int) $annot['opt']['a']['duration'][1] . ']';
+                    }
+                }
+
+                if (isset($annot['opt']['a']['rate']) && \is_numeric($annot['opt']['a']['rate'])) {
+                    $action .= ' /Rate ' . \sprintf('%F', (float) $annot['opt']['a']['rate']);
+                }
+
+                if (isset($annot['opt']['a']['volume']) && \is_numeric($annot['opt']['a']['volume'])) {
+                    $action .= ' /Volume ' . \sprintf('%F', (float) $annot['opt']['a']['volume']);
+                }
+
+                if (isset($annot['opt']['a']['showcontrols']) && \is_bool($annot['opt']['a']['showcontrols'])) {
+                    $action .= ' /ShowControls ' . ($annot['opt']['a']['showcontrols'] ? 'true' : 'false');
+                }
+
+                $modes = ['Once', 'Open', 'Repeat', 'Palindrome'];
+                if (
+                    isset($annot['opt']['a']['mode'])
+                    && \is_string($annot['opt']['a']['mode'])
+                    && \in_array($annot['opt']['a']['mode'], $modes)
+                ) {
+                    $action .= ' /Mode /' . $annot['opt']['a']['mode'];
+                }
+
+                if (isset($annot['opt']['a']['synchronous']) && \is_bool($annot['opt']['a']['synchronous'])) {
+                    $action .= ' /Synchronous ' . ($annot['opt']['a']['synchronous'] ? 'true' : 'false');
+                }
+
+                if (
+                    isset($annot['opt']['a']['fwscale'])
+                    && \is_array($annot['opt']['a']['fwscale'])
+                    && (\count($annot['opt']['a']['fwscale']) === 2)
+                    && \is_numeric($annot['opt']['a']['fwscale'][0])
+                    && \is_numeric($annot['opt']['a']['fwscale'][1])
+                ) {
+                    $action .= ' /FWScale ['
+                        . (int) $annot['opt']['a']['fwscale'][0]
+                        . ' ' . (int) $annot['opt']['a']['fwscale'][1]
+                        . ']';
+                }
+
+                if (
+                    isset($annot['opt']['a']['fwposition'])
+                    && \is_array($annot['opt']['a']['fwposition'])
+                    && (\count($annot['opt']['a']['fwposition']) === 2)
+                    && \is_numeric($annot['opt']['a']['fwposition'][0])
+                    && \is_numeric($annot['opt']['a']['fwposition'][1])
+                ) {
+                    $action .= \sprintf(
+                        ' /FWPosition [%F %F]',
+                        (float) $annot['opt']['a']['fwposition'][0],
+                        (float) $annot['opt']['a']['fwposition'][1]
+                    );
+                }
+
+                if ($action !== '') {
+                    $out .= ' /A <<' . $action . ' >>';
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -2672,8 +3430,73 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeScreen(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = '';
+
+        if (! empty($annot['opt']['t']) && \is_string($annot['opt']['t'])) {
+            $out .= ' /T ' . $this->getOutTextString($annot['opt']['t'], $annot['n'], true);
+        }
+
+        if (! empty($annot['opt']['mk']) && \is_array($annot['opt']['mk'])) {
+            $out .= ' /MK <<';
+            if (isset($annot['opt']['mk']['r']) && \is_numeric($annot['opt']['mk']['r'])) {
+                $out .= ' /R ' . $annot['opt']['mk']['r'];
+            }
+
+            if (isset($annot['opt']['mk']['bc']) && \is_array($annot['opt']['mk']['bc'])) {
+                // @phpstan-ignore argument.type
+                $out .= ' /BC ' . static::getColorStringFromPercArray($annot['opt']['mk']['bc']);
+            }
+
+            if (isset($annot['opt']['mk']['bg']) && \is_array($annot['opt']['mk']['bg'])) {
+                // @phpstan-ignore argument.type
+                $out .= ' /BG ' . static::getColorStringFromPercArray($annot['opt']['mk']['bg']);
+            }
+
+            if (isset($annot['opt']['mk']['ca']) && \is_string($annot['opt']['mk']['ca'])) {
+                $out .= ' /CA ' . $annot['opt']['mk']['ca'];
+            }
+
+            if (isset($annot['opt']['mk']['rc']) && \is_string($annot['opt']['mk']['rc'])) {
+                $out .= ' /RC ' . $annot['opt']['mk']['rc'];
+            }
+
+            if (isset($annot['opt']['mk']['ac']) && \is_string($annot['opt']['mk']['ac'])) {
+                $out .= ' /AC ' . $annot['opt']['mk']['ac'];
+            }
+
+            if (
+                isset($annot['opt']['mk']['tp'])
+                && \is_numeric($annot['opt']['mk']['tp'])
+                && ($annot['opt']['mk']['tp'] >= 0)
+                && ($annot['opt']['mk']['tp'] <= 6)
+            ) {
+                $out .= ' /TP ' . (int) $annot['opt']['mk']['tp'];
+            }
+
+            $out .= ' >>';
+        }
+
+        if (
+            ! $this->pdfx
+            && isset($annot['opt']['a'])
+            && \is_string($annot['opt']['a'])
+            && ($annot['opt']['a'] !== '')
+            && (($this->pdfuaMode === '') || ! \str_contains($annot['opt']['a'], '/JavaScript'))
+        ) {
+            $out .= ' /A << ' . $annot['opt']['a'] . ' >>';
+        }
+
+        if (
+            ! $this->pdfx
+            && isset($annot['opt']['aa'])
+            && \is_string($annot['opt']['aa'])
+            && ($annot['opt']['aa'] !== '')
+            && (($this->pdfuaMode === '') || ! \str_contains($annot['opt']['aa'], '/JavaScript'))
+        ) {
+            $out .= ' /AA << ' . $annot['opt']['aa'] . ' >>';
+        }
+
+        return $out;
     }
 
     /**
@@ -2683,7 +3506,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypePrintermark(array $annot): string
     {
-        // @TODO
+        // PrinterMark payload dictionaries are currently not supported.
         return '';
     }
 
@@ -2694,8 +3517,35 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeRedact(array $annot): string
     {
-        // @TODO
-        return '';
+        $out = $this->getOutAnnotationQuadPoints($annot)
+            . $this->getOutAnnotationInteriorColor($annot);
+
+        if (isset($annot['opt']['ro']) && \is_string($annot['opt']['ro'])) {
+            $out .= ' /RO ' . $this->encrypt->escapeDataString($annot['opt']['ro'], $annot['n']);
+        }
+
+        if (isset($annot['opt']['overlaytext']) && \is_string($annot['opt']['overlaytext'])) {
+            $out .= ' /OverlayText ' . $this->getOutTextString($annot['opt']['overlaytext'], $annot['n'], true);
+        }
+
+        if (isset($annot['opt']['repeat']) && \is_bool($annot['opt']['repeat'])) {
+            $out .= ' /Repeat ' . ($annot['opt']['repeat'] ? 'true' : 'false');
+        }
+
+        if (isset($annot['opt']['da']) && \is_string($annot['opt']['da']) && ($annot['opt']['da'] !== '')) {
+            $out .= ' /DA ' . $this->encrypt->escapeDataString($annot['opt']['da'], $annot['n']);
+        }
+
+        if (
+            isset($annot['opt']['q'])
+            && \is_numeric($annot['opt']['q'])
+            && ($annot['opt']['q'] >= 0)
+            && ($annot['opt']['q'] <= 2)
+        ) {
+            $out .= ' /Q ' . (int) $annot['opt']['q'];
+        }
+
+        return $out;
     }
 
     /**
@@ -2705,7 +3555,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeTrapnet(array $annot): string
     {
-        // @TODO
+        // TrapNet annotations are currently not supported.
         return '';
     }
 
@@ -2716,8 +3566,50 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtypeWatermark(array $annot): string
     {
-        // @TODO
-        return '';
+        if (! isset($annot['opt']['fixedprint']) || ! \is_array($annot['opt']['fixedprint'])) {
+            return '';
+        }
+
+        $out = '';
+        if (! empty($annot['opt']['fixedprint']['type']) && \is_string($annot['opt']['fixedprint']['type'])) {
+            $out .= ' /Type /' . $annot['opt']['fixedprint']['type'];
+        }
+
+        if (
+            isset($annot['opt']['fixedprint']['matrix'])
+            && \is_array($annot['opt']['fixedprint']['matrix'])
+            && (\count($annot['opt']['fixedprint']['matrix']) === 6)
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][0])
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][1])
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][2])
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][3])
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][4])
+            && \is_numeric($annot['opt']['fixedprint']['matrix'][5])
+        ) {
+            $out .= \sprintf(
+                ' /Matrix [%F %F %F %F %F %F]',
+                (float) $annot['opt']['fixedprint']['matrix'][0],
+                (float) $annot['opt']['fixedprint']['matrix'][1],
+                (float) $annot['opt']['fixedprint']['matrix'][2],
+                (float) $annot['opt']['fixedprint']['matrix'][3],
+                (float) $annot['opt']['fixedprint']['matrix'][4],
+                (float) $annot['opt']['fixedprint']['matrix'][5],
+            );
+        }
+
+        if (isset($annot['opt']['fixedprint']['h']) && \is_numeric($annot['opt']['fixedprint']['h'])) {
+            $out .= ' /H ' . \sprintf('%F', (float) $annot['opt']['fixedprint']['h']);
+        }
+
+        if (isset($annot['opt']['fixedprint']['v']) && \is_numeric($annot['opt']['fixedprint']['v'])) {
+            $out .= ' /V ' . \sprintf('%F', (float) $annot['opt']['fixedprint']['v']);
+        }
+
+        if ($out === '') {
+            return '';
+        }
+
+        return ' /FixedPrint <<' . $out . ' >>';
     }
 
     /**
@@ -2727,7 +3619,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      */
     protected function getOutAnnotationOptSubtype3D(array $annot): string
     {
-        // @TODO
+        // 3D annotation dictionaries are currently not supported.
         return '';
     }
 
@@ -4264,6 +5156,26 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         }
 
         $out .= $this->image->getXobjectDict();
+
+        return $out . ' >>';
+    }
+
+    /**
+     * Get the PDF output string for Pattern resources dictionary.
+     */
+    protected function getPatternDict(): string
+    {
+        if (empty($this->patterns)) {
+            return '';
+        }
+
+        $out = ' /Pattern <<';
+        foreach ($this->patterns as $pid => $pattern) {
+            if (empty($pattern['n'])) {
+                continue;
+            }
+            $out .= ' /' . $pid . ' ' . $pattern['n'] . ' 0 R';
+        }
 
         return $out . ' >>';
     }
