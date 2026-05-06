@@ -64,6 +64,100 @@ class OutputTest extends TestUtil
         }
     }
 
+    /**
+        * @param list<string> $cmd
+     * @return array{code:int,stdout:string,stderr:string}
+     */
+    private function runExternalCommand(array $cmd, string $cwd): array
+    {
+        $desc = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $proc = \proc_open($cmd, $desc, $pipes, $cwd);
+        if (!\is_resource($proc)) {
+            return ['code' => 127, 'stdout' => '', 'stderr' => 'Unable to start process'];
+        }
+
+        \fclose($pipes[0]);
+        $stdout = (string) \stream_get_contents($pipes[1]);
+        \fclose($pipes[1]);
+        $stderr = (string) \stream_get_contents($pipes[2]);
+        \fclose($pipes[2]);
+        $code = \proc_close($proc);
+
+        return ['code' => $code, 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    private function isCommandAvailable(string $name): bool
+    {
+        $res = $this->runExternalCommand(['sh', '-lc', 'command -v ' . \escapeshellarg($name)], __DIR__ . '/..');
+        return (($res['code'] === 0) && (\trim($res['stdout']) !== ''));
+    }
+
+    public function testSubsetFontPdfHasReaderCompatibleFontObjects(): void
+    {
+        $obj = new \Com\Tecnick\Pdf\Tcpdf('mm', true, true, true);
+        $font = $obj->font->insert($obj->pon, 'dejavusans', '', 12);
+        $obj->addPage();
+        $obj->page->addContent($font['out']);
+        $obj->addHTMLCell(
+            '<h1>Subset Font Regression</h1><p><b>Bold</b> THE QUICK BROWN FOX · π ≈ 3.14159 © ® ™</p>',
+            15,
+            20,
+            180
+        );
+
+        $raw = $obj->getOutPDFString();
+
+        // Ensure CID metadata is explicit and no empty CID registry/ordering is emitted.
+        $this->assertStringContainsString('/Subtype /CIDFontType2', $raw);
+        $this->assertStringNotContainsString('/Registry () /Ordering ()', $raw);
+        $this->assertMatchesRegularExpression('/\\/Registry \(Adobe\) \\/Ordering \(Identity\) \\/Supplement 0/', $raw);
+
+        // Embedded subset streams should be non-trivial font payloads, not tiny/broken stubs.
+        $matches = [];
+        \preg_match_all('/\\/Length1\\s+(\\d+)/', $raw, $matches);
+        $lengths = \array_map('intval', $matches[1]);
+        if ($lengths === []) {
+            $this->fail('Expected at least one Length1 entry in generated PDF.');
+        }
+        $this->assertGreaterThan(1000, \max($lengths));
+
+        $tmpBase = \sys_get_temp_dir() . '/tc-lib-pdf-subset-' . \bin2hex(\random_bytes(6));
+        $pdfPath = $tmpBase . '.pdf';
+        \file_put_contents($pdfPath, $raw);
+
+        try {
+            if ($this->isCommandAvailable('pdftoppm')) {
+                $popplerOut = $this->runExternalCommand(
+                    ['pdftoppm', '-f', '1', '-singlefile', '-png', $pdfPath, $tmpBase . '-poppler'],
+                    __DIR__ . '/..'
+                );
+                $this->assertSame(0, $popplerOut['code'], $popplerOut['stderr']);
+                $this->assertStringNotContainsString("Couldn't create a font", $popplerOut['stderr']);
+                @\unlink($tmpBase . '-poppler.png');
+            }
+
+            if ($this->isCommandAvailable('mutool')) {
+                $mupdfPng = $tmpBase . '-mupdf.png';
+                $mupdfOut = $this->runExternalCommand(
+                    ['mutool', 'draw', '-o', $mupdfPng, $pdfPath, '1'],
+                    __DIR__ . '/..'
+                );
+                $this->assertSame(0, $mupdfOut['code'], $mupdfOut['stderr']);
+                $this->assertStringNotContainsString('FT_New_Memory_Face', $mupdfOut['stderr']);
+                $this->assertStringNotContainsString('locations (loca) table missing', $mupdfOut['stderr']);
+                $this->assertStringNotContainsString('broken table', $mupdfOut['stderr']);
+                @\unlink($mupdfPng);
+            }
+        } finally {
+            @\unlink($pdfPath);
+        }
+    }
+
     public function testGetOutPDFStringReturnsRawPdfDocument(): void
     {
         $obj = $this->getTestObject();
@@ -1630,6 +1724,72 @@ PHP;
         $this->assertStringNotContainsString('/P <</MCID 0>> BDC', $out);
     }
 
+    public function testGetOutPDFBodyTagsHtmlTextInPdfuaMode(): void
+    {
+        $obj = $this->getInternalUncompressedTestObject();
+        $this->initFontAndPage($obj);
+        $this->setObjectProperty($obj, 'pdfuaMode', 'pdfua1');
+
+        $obj->addHTMLCell('<h1>PDF/UA</h1><p>Mode: pdfua</p>', 10, 10, 80, 20);
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        $this->assertStringContainsString('/Type /StructTreeRoot', $out);
+        $this->assertStringContainsString('/H1 <</MCID 0>> BDC', $out);
+        $this->assertStringContainsString('/P <</MCID 1>> BDC', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /H1', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /P', $out);
+    }
+
+    public function testGetOutPDFBodyPreservesNestedStructElemHierarchy(): void
+    {
+        $obj = $this->getInternalUncompressedTestObject();
+        $page = $this->initFontAndPage($obj);
+        $this->setObjectProperty($obj, 'pdfuaMode', 'pdfua1');
+
+        $obj->beginStructElem('Sect', $page['pid']);
+        $obj->beginStructElem('H1', $page['pid']);
+        $obj->addTextCell('Nested heading', $page['pid'], 10, 10, 60, 10);
+        $obj->endStructElem();
+        $obj->beginStructElem('P', $page['pid']);
+        $obj->addTextCell('Nested paragraph', $page['pid'], 10, 20, 60, 10);
+        $obj->endStructElem();
+        $obj->endStructElem();
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        $docMatch = [];
+        $this->assertSame(
+            1,
+            \preg_match(
+                '/(\d+) 0 obj\s*<< \/Type \/StructElem \/S \/Document .*?\/K \[\s*(\d+) 0 R\s*\] >>/s',
+                $out,
+                $docMatch,
+            )
+        );
+
+        $sectOid = $docMatch[2];
+        $sectMatch = [];
+        $this->assertSame(
+            1,
+            \preg_match(
+                '/' . $sectOid . ' 0 obj\\s*<< \/Type \/StructElem \/S \/Sect \/P ' . $docMatch[1]
+                . ' 0 R .*?\/K \[\s*(\d+) 0 R\s+(\d+) 0 R\s*\] >>/s',
+                $out,
+                $sectMatch,
+            )
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/' . $sectMatch[1] . ' 0 obj\\s*<< \/Type \/StructElem \/S \/H1 \/P ' . $sectOid . ' 0 R/s',
+            $out
+        );
+        $this->assertMatchesRegularExpression(
+            '/' . $sectMatch[2] . ' 0 obj\\s*<< \/Type \/StructElem \/S \/P \/P ' . $sectOid . ' 0 R/s',
+            $out
+        );
+    }
+
     public function testGetOutPDFBodyTagsHtmlImageAsFigureWithAltInPdfuaMode(): void
     {
         $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
@@ -1655,6 +1815,113 @@ PHP;
         $this->assertStringContainsString('/Figure <</MCID 0>> BDC', $out);
         $this->assertStringContainsString('/Type /StructElem /S /Figure', $out);
         $this->assertStringContainsString('/Alt ', $out);
+    }
+
+    public function testGetOutPDFBodyTagsHtmlTableStructRolesInPdfuaMode(): void
+    {
+        $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
+        $this->initFontAndPage($obj);
+
+        $html = '<table><thead><tr><th>Name</th><th>Value</th></tr></thead>'
+            . '<tbody><tr><td>A</td><td>1</td></tr></tbody></table>';
+        $htmlOut = $obj->getHTMLCell($html, 0, 0, 80, 30);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $page->addContent($htmlOut, $page->getPageId());
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        $this->assertStringContainsString('/Type /StructElem /S /Table', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /TR', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /TH', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /TD', $out);
+    }
+
+    public function testGetOutPDFBodyTagsHtmlListStructRolesInPdfuaMode(): void
+    {
+        $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
+        $this->initFontAndPage($obj);
+
+        $html = '<ul><li>Alpha</li><li>Beta</li></ul>';
+        $htmlOut = $obj->getHTMLCell($html, 0, 0, 80, 30);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $page->addContent($htmlOut, $page->getPageId());
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        $this->assertStringContainsString('/Type /StructElem /S /L', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /LI', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /LBody', $out);
+    }
+
+    public function testGetOutPDFBodyTagsManualFigureContentWithAltInPdfuaMode(): void
+    {
+        $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
+        $this->initFontAndPage($obj);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $pid = $page->getPageId();
+
+        $style = [
+            'all' => [
+                'lineWidth' => 0.3,
+                'lineCap' => 'butt',
+                'lineJoin' => 'miter',
+                'dashArray' => [],
+                'dashPhase' => 0,
+                'lineColor' => '#336699',
+                'fillColor' => '#cce0ff',
+            ],
+        ];
+
+        $obj->addTaggedFigureContent(
+            $obj->graph->getRect(10.0, 10.0, 12.0, 8.0, 'DF', $style),
+            $pid,
+            'Blue rectangle sample figure'
+        );
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        $this->assertStringContainsString('/Figure <</MCID 0>> BDC', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /Figure', $out);
+        $this->assertStringContainsString('/Alt ', $out);
+    }
+
+    public function testGetOutPDFBodyTagsHtmlFigureWithFigcaptionInPdfuaMode(): void
+    {
+        $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 4);
+        \imagecolorallocate($img, 255, 255, 255);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $this->assertIsString($raw);
+        $src = 'data:image/png;base64,' . \base64_encode($raw);
+
+        $html = '<figure><img src="' . $src . '" alt="Test dot" width="4" height="4" />'
+            . '<figcaption>Caption text</figcaption></figure>';
+        $htmlOut = $obj->getHTMLCell($html, 0, 0, 80, 30);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $page->addContent($htmlOut, $page->getPageId());
+
+        $out = $obj->exposeGetOutPDFBody();
+
+        // Single Figure struct elem (no nested Figure > Figure)
+        $this->assertSame(
+            1,
+            \substr_count($out, '/Type /StructElem /S /Figure'),
+            'Expected exactly one Figure StructElem'
+        );
+        $this->assertStringContainsString('/Alt ', $out);
+        $this->assertStringContainsString('/Type /StructElem /S /Caption', $out);
     }
 
     public function testGetOutCatalogIncludesRequiredEntries(): void
