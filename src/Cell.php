@@ -37,6 +37,48 @@ namespace Com\Tecnick\Pdf;
 abstract class Cell extends \Com\Tecnick\Pdf\Base
 {
     /**
+     * Normalize optional side aliases to numeric indexes used internally.
+     *
+     * Side mapping: T=0, R=1, B=2, L=3.
+     * Numeric indexes take precedence when both forms are provided.
+     *
+     * @param array<int|string, array<array<int>|float|int|string>|float|string> $styles
+     *
+     * @return array<int|string, StyleDataOpt>
+     */
+    protected function normalizeCellSideStyles(array $styles): array
+    {
+        if ($styles === []) {
+            return $styles;
+        }
+
+        $normalized = [];
+        foreach ($styles as $key => $style) {
+            if (!\is_array($style)) {
+                continue;
+            }
+
+            /** @var StyleDataOpt $style */
+            $normalized[$key] = $style;
+        }
+
+        $sideMap = [
+            'T' => 0,
+            'R' => 1,
+            'B' => 2,
+            'L' => 3,
+        ];
+
+        foreach ($sideMap as $sideKey => $sideIdx) {
+            if (!isset($normalized[$sideIdx]) && !empty($normalized[$sideKey])) {
+                $normalized[$sideIdx] = $normalized[$sideKey];
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Set the default cell margin in user units.
      *
      * @param float $top    Top.
@@ -118,6 +160,8 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
             $styles = $this->graph->getCurrentStyleArray();
         }
 
+        $styles = $this->normalizeCellSideStyles($styles);
+
         $border_ratio = \round(self::BORDERPOS_INTERNAL + $cell['borderpos'], 1);
 
         $minT = 0;
@@ -130,8 +174,7 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
             $minB = $minT;
             $minL = $minT;
         } elseif (
-            (\count($styles) == 4)
-            && isset($styles[0]['lineWidth'])
+            isset($styles[0]['lineWidth'])
             && isset($styles[1]['lineWidth'])
             && isset($styles[2]['lineWidth'])
             && isset($styles[3]['lineWidth'])
@@ -519,6 +562,18 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
     }
 
     /**
+     * Returns true when the style defines a visible border stroke.
+     *
+     * @param StyleDataOpt $style Style data.
+     */
+    protected function styleHasVisibleLineWidth(array $style): bool
+    {
+        return isset($style['lineWidth'])
+            && \is_numeric($style['lineWidth'])
+            && ((float) $style['lineWidth'] > 0.0);
+    }
+
+    /**
      * Returns the PDF code to draw the text cell border and background.
      *
      * @param float     $pntx     Cell left X coordinate in internal points.
@@ -538,6 +593,7 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
         array $styles = [],
         ?array $cell = null
     ) {
+        $styles = $this->normalizeCellSideStyles($styles);
 
         $drawfill = (!empty($styles['all']['fillColor']));
         $drawborder = (
@@ -611,15 +667,46 @@ abstract class Cell extends \Com\Tecnick\Pdf\Base
             ? $this->toPoints((float) $styles['2']['lineWidth'] * $cell['borderpos'])
             : $adj);
 
-        // different border styles for each side
-        $out .= $this->graph->getRect(
-            $this->toUnit($pntx + $adjx),
-            $this->toYUnit($pnty - $adjy),
-            $this->toUnit($pwidth - $adjw),
-            $this->toUnit($pheight - $adjh),
-            's', // close and stroke the path
-            $styles,
-        );
+        // draw only sides with a positive stroke width;
+        // PDF "0 w" is a hairline stroke, not "no border".
+        $rectx = $this->toUnit($pntx + $adjx);
+        $recty = $this->toYUnit($pnty - $adjy);
+        $rectw = $this->toUnit($pwidth - $adjw);
+        $recth = $this->toUnit($pheight - $adjh);
+        $sidestyles = [
+            0 => ($styles[0] ?? $styleall),
+            1 => ($styles[1] ?? $styleall),
+            2 => ($styles[2] ?? $styleall),
+            3 => ($styles[3] ?? $styleall),
+        ];
+
+        if ($this->styleHasVisibleLineWidth($sidestyles[0])) {
+            $out .= $this->graph->getLine($rectx, $recty, ($rectx + $rectw), $recty, $sidestyles[0]);
+        }
+
+        if ($this->styleHasVisibleLineWidth($sidestyles[1])) {
+            $out .= $this->graph->getLine(
+                ($rectx + $rectw),
+                $recty,
+                ($rectx + $rectw),
+                ($recty + $recth),
+                $sidestyles[1]
+            );
+        }
+
+        if ($this->styleHasVisibleLineWidth($sidestyles[2])) {
+            $out .= $this->graph->getLine(
+                ($rectx + $rectw),
+                ($recty + $recth),
+                $rectx,
+                ($recty + $recth),
+                $sidestyles[2]
+            );
+        }
+
+        if ($this->styleHasVisibleLineWidth($sidestyles[3])) {
+            $out .= $this->graph->getLine($rectx, ($recty + $recth), $rectx, $recty, $sidestyles[3]);
+        }
 
         return $out . $stoptr;
     }

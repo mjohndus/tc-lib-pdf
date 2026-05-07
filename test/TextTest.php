@@ -61,6 +61,30 @@ class TextTest extends TestUtil
         ], $obj->getLastBBox());
     }
 
+    public function testGetLastTextBBoxDefaultsToZeroBox(): void
+    {
+        $obj = $this->getTestObject();
+
+        $this->assertSame([
+            'x' => 0.0,
+            'y' => 0.0,
+            'w' => 0.0,
+            'h' => 0.0,
+        ], $obj->getLastTextBBox());
+    }
+
+    public function testGetLastCellBBoxDefaultsToZeroBox(): void
+    {
+        $obj = $this->getTestObject();
+
+        $this->assertSame([
+            'x' => 0.0,
+            'y' => 0.0,
+            'w' => 0.0,
+            'h' => 0.0,
+        ], $obj->getLastCellBBox());
+    }
+
     public function testLoadTexHyphenPatternsParsesFixture(): void
     {
         $obj = $this->getTestObject();
@@ -151,6 +175,38 @@ class TextTest extends TestUtil
         $this->assertNotSame('', $cell);
     }
 
+    public function testGetTextCellAcceptsNamedAndNumericBorderStyleSides(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFont($obj);
+        $obj->addPage();
+
+        $top = ['lineWidth' => 0.4, 'lineColor' => '#ff0000'];
+        $right = ['lineWidth' => 0.5, 'lineColor' => '#00aa00'];
+        $bottom = ['lineWidth' => 0.6, 'lineColor' => '#0000ff'];
+        $left = ['lineWidth' => 0.7, 'lineColor' => '#222222'];
+
+        $namedStyles = [
+            'T' => $top,
+            'R' => $right,
+            'B' => $bottom,
+            'L' => $left,
+        ];
+
+        $numericStyles = [
+            0 => $top,
+            1 => $right,
+            2 => $bottom,
+            3 => $left,
+        ];
+
+        $namedOut = $obj->getTextCell('Hello', 10, 20, 40, 12, 0, 0, 'T', 'L', null, $namedStyles);
+        $numericOut = $obj->getTextCell('Hello', 10, 20, 40, 12, 0, 0, 'T', 'L', null, $numericStyles);
+
+        $this->assertNotSame('', $namedOut);
+        $this->assertSame($numericOut, $namedOut);
+    }
+
     public function testAddTextCellAppendsContentToPage(): void
     {
         $obj = $this->getTestObject();
@@ -171,6 +227,39 @@ class TextTest extends TestUtil
         $this->assertNotNull($lastKey);
         $this->assertIsString($after[$lastKey]);
         $this->assertNotSame('', $after[$lastKey]);
+    }
+
+    public function testGetLastTextBBoxAndCellBBoxUpdatedByGetTextCell(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFont($obj);
+        $obj->addPage();
+
+        $obj->getTextCell('Hello world', 10, 20, 40, 12, 0, 0, 'T', 'L');
+
+        $textbbox = $obj->getLastTextBBox();
+        $cellbbox = $obj->getLastCellBBox();
+
+        $this->assertGreaterThan(0.0, $textbbox['w']);
+        $this->assertGreaterThan(0.0, $textbbox['h']);
+        $this->assertGreaterThan(0.0, $cellbbox['w']);
+        $this->assertGreaterThan(0.0, $cellbbox['h']);
+    }
+
+    public function testGetLastCellBBoxUpdatedByAddTextCell(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFont($obj);
+        $page = $obj->addPage();
+
+        $obj->addTextCell('Hello world', $page['pid'], 10, 20, 40, 12, 0, 0, 'T', 'L');
+
+        $cellbbox = $obj->getLastCellBBox();
+        $textbbox = $obj->getLastTextBBox();
+        $this->assertGreaterThan(0.0, $cellbbox['w']);
+        $this->assertGreaterThan(0.0, $cellbbox['h']);
+        $this->assertGreaterThan(0.0, $textbbox['w']);
+        $this->assertGreaterThan(0.0, $textbbox['h']);
     }
 
     public function testTextOperatorHelpersCoverModesAndFormatting(): void
