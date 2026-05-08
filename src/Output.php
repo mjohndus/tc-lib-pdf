@@ -444,6 +444,8 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *
  * @phpstan-type TSignature array{
  *        'appearance': array{
+ *            'ap'?: string|array<string, string|array<string, string>>,
+ *            'as'?: string,
  *            'empty': array<int, array{
  *                'objid': int,
  *                'name': string,
@@ -453,6 +455,7 @@ use Com\Tecnick\Pdf\Font\Output as OutFont;
  *            'name': string,
  *            'page': int,
  *            'rect': string,
+ *            'xobj'?: string,
  *        },
  *        'approval': string,
  *        'cert_type': int,
@@ -619,6 +622,13 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
      * @var array<int, int>
      */
     protected array $pagestructmcids = [];
+
+    /**
+     * Struct parent keys assigned to annotation object IDs.
+     *
+     * @var array<int, int>
+     */
+    protected array $annotstructparents = [];
 
     /**
      * Returns the RAW PDF string.
@@ -1684,6 +1694,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         if ($this->pdfuaMode === '') {
             $this->pagestructparents = [];
             $this->pagestructmcids = [];
+            $this->annotstructparents = [];
             $this->parenttreeoid = 0;
             $this->structtreerootoid = 0;
             return '';
@@ -1691,6 +1702,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
 
         $structLog = $this->pdfuaStructLog;
         if ($structLog === []) {
+            $this->annotstructparents = [];
             $this->parenttreeoid = 0;
             $this->structtreerootoid = 0;
             return '';
@@ -1707,11 +1719,15 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $parentTreeOid = ++$this->pon;
         $structTreeRootOid = $parentTreeOid + 1;
         $documentStructElemOid = $parentTreeOid + 2;
+        $namespaceOid = 0;
+        if ($this->pdfuaMode === 'pdfua2') {
+            $namespaceOid = $parentTreeOid + 3;
+        }
 
         // Assign OIDs to each struct elem entry.
         // $elemOids[i] = OID for $structLog[i]
         $elemOids = [];
-        $nextOid = $parentTreeOid + 3;
+        $nextOid = $parentTreeOid + (($namespaceOid > 0) ? 4 : 3);
         foreach ($structLog as $idx => $_entry) {
             $elemOids[$idx] = $nextOid++;
         }
@@ -1754,10 +1770,15 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             $documentStructElem .= ' /Pg ' . $firstPageOid . ' 0 R';
         }
 
+        if ($namespaceOid > 0) {
+            $documentStructElem .= ' /NS ' . $namespaceOid . ' 0 R';
+        }
+
         $documentStructElem .= ' /K [ ' . $rootElemRefsStr . ' ] >>';
 
         // Nested StructElems and ParentTree map.
         $parentTreeMap = [];
+        $annotParentMap = [];
         $structElemsOut = '';
         $buildStructElem = function (
             int $entryIdx,
@@ -1766,6 +1787,7 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             &$buildStructElem,
             &$elemOids,
             &$parentTreeMap,
+            &$annotParentMap,
             &$pidToOid,
             &$structElemsOut,
             $structLog,
@@ -1789,15 +1811,72 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                 $kidsOut .= ' << /Type /MCR /Pg ' . $entryPageOid . ' 0 R /MCID ' . $mcid . ' >>';
             }
 
+            if (!empty($entry['annots']) && \is_array($entry['annots'])) {
+                foreach ($entry['annots'] as $annotOid) {
+                    if (!\is_int($annotOid) || ($annotOid <= 0)) {
+                        continue;
+                    }
+
+                    $annotParentMap[$annotOid] = $elemOids[$entryIdx];
+                    $kidsOut .= ' << /Type /OBJR /Pg ' . $entryPageOid . ' 0 R /Obj '
+                        . $annotOid . ' 0 R >>';
+                }
+            }
+
             $altOut = '';
             if (isset($entry['alt']) && \is_string($entry['alt']) && $entry['alt'] !== '') {
                 $altOut = ' /Alt ' . $this->getOutTextString($entry['alt'], $elemOids[$entryIdx], true);
+            }
+
+            $attrOut = '';
+            $idOut = '';
+            if (!empty($entry['attr']) && \is_array($entry['attr'])) {
+                $attrPairs = '';
+                foreach ($entry['attr'] as $akey => $aval) {
+                    if (!\is_string($akey) || !\is_string($aval) || ($akey === '') || ($aval === '')) {
+                        continue;
+                    }
+
+                    if ($akey === 'ID') {
+                        $idOut = ' /ID ' . $this->getOutTextString($aval, $elemOids[$entryIdx], false);
+                        continue;
+                    }
+
+                    if ($akey === 'Headers') {
+                        $headerIds = \preg_split('/[\s,]+/', \trim($aval));
+                        if ($headerIds === false) {
+                            continue;
+                        }
+
+                        $headerOut = '';
+                        foreach ($headerIds as $headerId) {
+                            if ($headerId === '') {
+                                continue;
+                            }
+
+                            $headerOut .= ' ' . $this->getOutTextString($headerId, $elemOids[$entryIdx], false);
+                        }
+
+                        if ($headerOut !== '') {
+                            $attrPairs .= ' /Headers [' . $headerOut . ' ]';
+                        }
+                        continue;
+                    }
+
+                    $attrPairs .= ' /' . $akey . ' /' . $aval;
+                }
+
+                if ($attrPairs !== '') {
+                    $attrOut = ' /A <<' . $attrPairs . ' >>';
+                }
             }
 
             $structElemsOut .= $elemOids[$entryIdx] . ' 0 obj' . "\n"
                 . '<< /Type /StructElem /S /' . $entry['role'] . ' /P ' . $parentOid . ' 0 R'
                 . ' /Pg ' . $entryPageOid . ' 0 R'
                 . $altOut
+                . $idOut
+                . $attrOut
                 . ' /K [' . $kidsOut . ' ] >>' . "\n"
                 . 'endobj' . "\n";
         };
@@ -1819,18 +1898,41 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             $parentNums .= ' ]';
         }
 
+        $this->annotstructparents = [];
+        $nextParentKey = \count($this->pagestructparents);
+        if ($annotParentMap !== []) {
+            \ksort($annotParentMap);
+            foreach ($annotParentMap as $annotOid => $structElemOid) {
+                $this->annotstructparents[$annotOid] = $nextParentKey;
+                $parentNums .= ' ' . $nextParentKey . ' ' . $structElemOid . ' 0 R';
+                ++$nextParentKey;
+            }
+        }
+
         $out = $parentTreeOid . ' 0 obj' . "\n"
             . '<< /Nums [' . $parentNums . ' ] >>' . "\n"
             . 'endobj' . "\n";
 
+        $namespaceOut = '';
+        if ($namespaceOid > 0) {
+            $namespaceOut = $namespaceOid . ' 0 obj' . "\n"
+                . '<< /Type /Namespace /NS '
+                . $this->getOutTextString('http://iso.org/pdf2/ssn', $namespaceOid, true)
+                . ' >>' . "\n"
+                . 'endobj' . "\n";
+        }
+
         return $out
             . $structTreeRootOid . ' 0 obj' . "\n"
             . '<< /Type /StructTreeRoot /ParentTree ' . $parentTreeOid . ' 0 R /ParentTreeNextKey '
-            . \count($this->pagestructparents) . ' /K [ ' . $documentStructElemOid . ' 0 R ] >>' . "\n"
+            . $nextParentKey . ' /K [ ' . $documentStructElemOid . ' 0 R ]'
+            . (($namespaceOid > 0) ? (' /Namespaces [ ' . $namespaceOid . ' 0 R ]') : '')
+            . ' >>' . "\n"
             . 'endobj' . "\n"
             . $documentStructElemOid . ' 0 obj' . "\n"
             . $documentStructElem . "\n"
             . 'endobj' . "\n"
+            . $namespaceOut
             . $structElemsOut;
     }
 
@@ -1848,8 +1950,15 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                 continue;
             }
 
+            $tabs = '';
+            if (!empty($page['annotrefs']) && \is_array($page['annotrefs'])) {
+                $tabs = '/Tabs /S' . "\n";
+            }
+
             $needle = $page['n'] . ' 0 obj' . "\n<<" . "\n/Type /Page" . "\n";
-            $replacement = $page['n'] . ' 0 obj' . "\n<<" . "\n/Type /Page" . "\n/StructParents " . $parentKey . "\n";
+            $replacement = $page['n']
+                . ' 0 obj' . "\n<<" . "\n/Type /Page" . "\n/StructParents " . $parentKey . "\n"
+                . $tabs;
             $pdfpages = \str_replace($needle, $replacement, $pdfpages);
             $this->pagestructparents[$page['n']] = $parentKey;
             ++$parentKey;
@@ -1947,7 +2056,10 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                      $out .= ' /C [ ' . $this->color->getPdfRgbComponents($annot['opt']['c']) . ' ]';
                 }
 
-                //$out .= ' /StructParent ';
+                if (($this->pdfuaMode !== '') && isset($this->annotstructparents[(int) $oid])) {
+                    $out .= ' /StructParent ' . $this->annotstructparents[(int) $oid];
+                }
+
                 //$out .= ' /OC ';
 
                 $out .= $this->getOutAnnotationMarkups($annot, $oid) // @phpstan-ignore-line
@@ -3584,24 +3696,24 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             $out .= ' >>';
         }
 
+        $optAction = (isset($annot['opt']['a']) && \is_string($annot['opt']['a'])) ? $annot['opt']['a'] : '';
         if (
             ! $this->pdfx
-            && isset($annot['opt']['a'])
-            && \is_string($annot['opt']['a'])
-            && ($annot['opt']['a'] !== '')
-            && (($this->pdfuaMode === '') || ! \str_contains($annot['opt']['a'], '/JavaScript'))
+            && ($optAction !== '')
+            && (($this->pdfuaMode === '') || ! \str_contains($optAction, '/JavaScript'))
         ) {
-            $out .= ' /A << ' . $annot['opt']['a'] . ' >>';
+            $out .= ' /A << ' . $optAction . ' >>';
         }
 
+        $optAdditionalAction = (isset($annot['opt']['aa']) && \is_string(
+            $annot['opt']['aa']
+        )) ? $annot['opt']['aa'] : '';
         if (
             ! $this->pdfx
-            && isset($annot['opt']['aa'])
-            && \is_string($annot['opt']['aa'])
-            && ($annot['opt']['aa'] !== '')
-            && (($this->pdfuaMode === '') || ! \str_contains($annot['opt']['aa'], '/JavaScript'))
+            && ($optAdditionalAction !== '')
+            && (($this->pdfuaMode === '') || ! \str_contains($optAdditionalAction, '/JavaScript'))
         ) {
-            $out .= ' /AA << ' . $annot['opt']['aa'] . ' >>';
+            $out .= ' /AA << ' . $optAdditionalAction . ' >>';
         }
 
         return $out;
@@ -5129,6 +5241,19 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
         $soid = $this->objid['signature'];
         $oid = $soid + 1;
         $page = $this->page->getPage($this->signature['appearance']['page']);
+        $sigRect = \preg_split('/\s+/', \trim((string) $this->signature['appearance']['rect']));
+        $sigWidth = 0.0;
+        $sigHeight = 0.0;
+        if (($sigRect !== false) && (\count($sigRect) >= 4)) {
+            $sigWidth = \abs(((float) $sigRect[2]) - ((float) $sigRect[0]));
+            $sigHeight = \abs(((float) $sigRect[3]) - ((float) $sigRect[1]));
+        }
+
+        list($sigAppearance, $sigAppearanceXObj) = $this->getSignatureAppearanceStream(
+            $sigWidth,
+            $sigHeight,
+        );
+
         $out = $soid . ' 0 obj' . "\n"
             . '<<'
             . ' /Type /Annot'
@@ -5139,9 +5264,11 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             . ' /FT /Sig'
             . ' /T ' . $this->getOutTextString($this->signature['appearance']['name'], $soid, true)
             . ' /Ff 0'
+            . $sigAppearance
             . ' /V ' . $oid . ' 0 R'
             . ' >>' . "\n"
             . 'endobj' . "\n";
+        $out .= $sigAppearanceXObj;
         $out .= $oid . ' 0 obj' . "\n";
         $out .= '<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached '
             . $this::BYTERANGE
@@ -5167,6 +5294,80 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             . $this->getOutDateTimeString($this->docmodtime, $oid)
             . ' >>' . "\n"
             . 'endobj' . "\n";
+    }
+
+    /**
+     * Returns the signature widget Appearance Stream.
+     *
+     * @return array{string, string}
+     */
+    protected function getSignatureAppearanceStream(float $width = 0, float $height = 0): array
+    {
+        $appearance = [];
+        if (isset($this->signature['appearance']) && \is_array($this->signature['appearance'])) {
+            $appearance = $this->signature['appearance'];
+        }
+
+        $out = '';
+        if (!empty($appearance['as']) && \is_string($appearance['as'])) {
+            $out .= ' /AS /' . $appearance['as'];
+        }
+
+        if (empty($appearance['ap']) && !empty($appearance['xobj']) && \is_string($appearance['xobj'])) {
+            $xobjid = $appearance['xobj'];
+            if (!empty($this->xobjects[$xobjid])) {
+                $xobjw = (float) ($this->xobjects[$xobjid]['w'] ?? 0.0);
+                $xobjh = (float) ($this->xobjects[$xobjid]['h'] ?? 0.0);
+                if (($xobjw > 0.0) && ($xobjh > 0.0)) {
+                    $sx = ($width > 0.0) ? ($width / $xobjw) : 1.0;
+                    $sy = ($height > 0.0) ? ($height / $xobjh) : 1.0;
+                    $appearance['ap'] = [
+                        'n' => \sprintf('q %F 0 0 %F 0 0 cm /%s Do Q', $sx, $sy, $xobjid),
+                    ];
+                }
+            }
+        }
+
+        if (empty($appearance['ap'])) {
+            return [$out, ''];
+        }
+
+        $apxout = '';
+        $out .= ' /AP <<';
+        if (!\is_array($appearance['ap'])) {
+            $out .= $appearance['ap'];
+            return [$out . ' >>', $apxout];
+        }
+
+        foreach ($appearance['ap'] as $mode => $def) {
+            $out .= ' /' . \strtoupper((string) $mode);
+            if (\is_array($def)) {
+                $out .= ' <<';
+                foreach ($def as $apstate => $stream) {
+                    if (!\is_string($stream)) {
+                        continue;
+                    }
+
+                    $apxout .= $this->getOutAPXObjects($width, $height, $stream);
+                    $out .= ' /' . $apstate . ' ' . $this->pon . ' 0 R';
+                }
+
+                $out .= ' >>';
+                continue;
+            }
+
+            if (!\is_string($def)) {
+                continue;
+            }
+
+            $apxout .= $this->getOutAPXObjects($width, $height, $def);
+            $out .= ' ' . $this->pon . ' 0 R';
+        }
+
+        return [
+            $out . ' >>',
+            $apxout,
+        ];
     }
 
     /**

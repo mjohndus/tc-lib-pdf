@@ -129,6 +129,8 @@ use Com\Tecnick\Unicode\Convert as ObjUniConvert;
  *    mcids: int[],
  *    kids: TPdfUaStructKid[],
  *    alt?: string,
+ *    annots?: int[],
+ *    attr?: array<string, string>,
  * }
  *
  * @phpstan-import-type TAnnot from Output
@@ -200,7 +202,7 @@ abstract class Base
     /**
      * TCPDF version.
      */
-    protected string $version = '8.15.1';
+    protected string $version = '8.18.0';
 
     /**
      * Time is seconds since EPOCH when the document was created.
@@ -588,10 +590,13 @@ abstract class Base
      */
     protected array $signature = [
         'appearance' => [
+            'ap' => [],
+            'as' => '',
             'empty' => [],
             'name' => '',
             'page' => 0,
             'rect' => '',
+            'xobj' => '',
         ],
         'approval' => '',
         'cert_type' => -1,
