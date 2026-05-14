@@ -30,7 +30,6 @@ class MetaInfoTest extends TestUtil
         return new TestablMetaInfo();
     }
 
-
     public function testGetVersionReturnsNonEmptyString(): void
     {
         $obj = $this->getTestObject();
@@ -78,7 +77,6 @@ class MetaInfoTest extends TestUtil
     {
         $obj = $this->getTestObject();
         $pdfa = new \ReflectionProperty(\Com\Tecnick\Pdf\Tcpdf::class, 'pdfa');
-        $pdfa->setAccessible(true);
         $pdfa->setValue($obj, $pdfaMode);
 
         $obj->setPDFVersion($inputVersion);
@@ -90,11 +88,10 @@ class MetaInfoTest extends TestUtil
     public function testSetPDFVersionHonorsPdfuaModes(
         string $pdfuaMode,
         string $inputVersion,
-        string $expectedVersion
+        string $expectedVersion,
     ): void {
         $obj = $this->getTestObject();
         $pdfua = new \ReflectionProperty(\Com\Tecnick\Pdf\Tcpdf::class, 'pdfuaMode');
-        $pdfua->setAccessible(true);
         $pdfua->setValue($obj, $pdfuaMode);
 
         $obj->setPDFVersion($inputVersion);
@@ -147,8 +144,11 @@ class MetaInfoTest extends TestUtil
 
     /** @param ?array<string, mixed> $viewerPref */
     #[DataProvider('pagePrintScalingFixtureProvider')]
-    public function testGetPagePrintScalingReturnsExpectedValue(?array $viewerPref, string $expectedToken): void
-    {
+    public function testGetPagePrintScalingReturnsExpectedValue(
+        ?array $viewerPref,
+        #[\SensitiveParameter]
+        string $expectedToken,
+    ): void {
         $obj = $this->getInternalTestObject();
         if ($viewerPref !== null) {
             $this->setObjectProperty($obj, 'viewerpref', $viewerPref);
@@ -210,7 +210,6 @@ class MetaInfoTest extends TestUtil
 
         $this->assertStringContainsString('/HideToolbar ' . $expectedWord, $result);
     }
-
 
     public function testGetFormattedDateReturnsPdfDateStyle(): void
     {
@@ -307,7 +306,7 @@ class MetaInfoTest extends TestUtil
     public function testSetPDFVersionHonorsPdfxModes(
         string $pdfxMode,
         string $inputVersion,
-        string $expectedVersion
+        string $expectedVersion,
     ): void {
         $obj = $this->getTestObject();
         $this->setObjectProperty($obj, 'pdfx', true);
@@ -319,10 +318,8 @@ class MetaInfoTest extends TestUtil
     }
 
     #[DataProvider('pdfxGtsVersionStringFixtureProvider')]
-    public function testGetGtsPdfxVersionStringReturnsExpectedValue(
-        string $pdfxMode,
-        string $expected
-    ): void {
+    public function testGetGtsPdfxVersionStringReturnsExpectedValue(string $pdfxMode, string $expected): void
+    {
         $obj = $this->getInternalTestObject();
         $this->setObjectProperty($obj, 'pdfx', true);
         $this->setObjectProperty($obj, 'pdfxMode', $pdfxMode);
@@ -444,13 +441,13 @@ class MetaInfoTest extends TestUtil
     public static function pdfxVersionFixtureProvider(): array
     {
         return [
-            'pdfx1a_enforces_min_1_3_when_lower'   => ['pdfx1a', '1.1', '1.3'],
-            'pdfx1a_allows_higher_explicit'         => ['pdfx1a', '1.6', '1.6'],
-            'pdfx3_enforces_min_1_3'                => ['pdfx3', '1.2', '1.3'],
-            'pdfx4_enforces_min_1_6_when_lower'     => ['pdfx4', '1.3', '1.6'],
-            'pdfx4_allows_higher_explicit'          => ['pdfx4', '1.7', '1.7'],
-            'pdfx5_enforces_min_1_6'                => ['pdfx5', '1.4', '1.6'],
-            'pdfx_generic_enforces_min_1_3'         => ['pdfx', '1.1', '1.3'],
+            'pdfx1a_enforces_min_1_3_when_lower' => ['pdfx1a', '1.1', '1.3'],
+            'pdfx1a_allows_higher_explicit' => ['pdfx1a', '1.6', '1.6'],
+            'pdfx3_enforces_min_1_3' => ['pdfx3', '1.2', '1.3'],
+            'pdfx4_enforces_min_1_6_when_lower' => ['pdfx4', '1.3', '1.6'],
+            'pdfx4_allows_higher_explicit' => ['pdfx4', '1.7', '1.7'],
+            'pdfx5_enforces_min_1_6' => ['pdfx5', '1.4', '1.6'],
+            'pdfx_generic_enforces_min_1_3' => ['pdfx', '1.1', '1.3'],
         ];
     }
 
@@ -459,9 +456,9 @@ class MetaInfoTest extends TestUtil
     {
         return [
             'pdfx1a' => ['pdfx1a', 'PDF/X-1a:2003'],
-            'pdfx3'  => ['pdfx3',  'PDF/X-3:2003'],
-            'pdfx4'  => ['pdfx4',  'PDF/X-4:2010'],
-            'pdfx5'  => ['pdfx5',  'PDF/X-5g:2010'],
+            'pdfx3' => ['pdfx3', 'PDF/X-3:2003'],
+            'pdfx4' => ['pdfx4', 'PDF/X-4:2010'],
+            'pdfx5' => ['pdfx5', 'PDF/X-5g:2010'],
             'pdfx_generic_defaults_to_x3' => ['pdfx', 'PDF/X-3:2003'],
         ];
     }

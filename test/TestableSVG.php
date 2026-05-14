@@ -413,7 +413,7 @@ class TestableSVG extends \Com\Tecnick\Pdf\Tcpdf
             $width,
             $height,
             $clip_fnc,
-            $clip_par
+            $clip_par,
         );
         return [$out, $svgstyle];
     }
@@ -505,7 +505,6 @@ class TestableSVG extends \Com\Tecnick\Pdf\Tcpdf
     {
         /** @var TSVGObj $svgobj */
         $svgobj = \array_replace_recursive($this->svgobjs[$soid], $patch);
-        // @phpstan-ignore-next-line assign.propertyType
         $this->svgobjs[$soid] = $svgobj;
     }
 
