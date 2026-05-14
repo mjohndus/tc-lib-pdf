@@ -1,5 +1,5 @@
 {
-    "name": "tecnickcom/tc-lib-pdf",
+    "name": "mjohndus/tc-lib-pdf",
     "description": "PHP PDF Library",
     "type": "library",
     "homepage": "https://tcpdf.org",
@@ -28,7 +28,6 @@
         "php": ">=8.2",
         "ext-date": "*",
         "ext-pcre": "*",
-        "tecnickcom/tc-lib-barcode": "^2.5",
         "tecnickcom/tc-lib-color": "^2.6",
         "tecnickcom/tc-lib-pdf-image": "^2.3",
         "tecnickcom/tc-lib-pdf-font": "^2.13",
