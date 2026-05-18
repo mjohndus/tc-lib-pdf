@@ -36,6 +36,32 @@ use Com\Tecnick\Pdf\Exception as PdfException;
  * @link      https://github.com/tecnickcom/tc-lib-pdf
  *
  * @phpstan-import-type TViewerPref from Base
+ * @phpstan-import-type TObjID from Base
+ * @phpstan-import-type TCustomXMP from Base
+ * @mixin \Com\Tecnick\Pdf\Base
+ * @property string $version
+ * @property int $pdfa
+ * @property string $pdfaConformance
+ * @property string $pdfver
+ * @property string $pdfuaMode
+ * @property bool $pdfx
+ * @property string $pdfxMode
+ * @property bool $sRGB
+ * @property int $doctime
+ * @property int $docmodtime
+ * @property string $creator
+ * @property string $author
+ * @property string $subject
+ * @property string $title
+ * @property string $keywords
+ * @property string $fileid
+ * @property \Com\Tecnick\Pdf\Encrypt\Encrypt $encrypt
+ * @property int $pon
+ * @property array<string, mixed> $objid
+ * @property array<string, string> $custom_xmp
+ * @property array<string, mixed> $viewerpref
+ * @property bool $rtl
+ * @property bool $isunicode
  *
  * @SuppressWarnings("PHPMD.DepthOfInheritance")
  */
@@ -49,44 +75,48 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
     protected const VALIDZOOM = ['fullpage', 'fullwidth', 'real', 'default'];
 
     /**
+     * Map normalized page box names to canonical PDF box names.
+     *
+     * @var array<string, string>
+     */
+    protected const VALID_PAGE_BOXES = [
+        'mediabox' => 'MediaBox',
+        'cropbox' => 'CropBox',
+        'bleedbox' => 'BleedBox',
+        'trimbox' => 'TrimBox',
+        'artbox' => 'ArtBox',
+    ];
+
+    /**
+     * Format a text string for output.
+     *
+     * @param string $str String to escape.
+     * @param int    $oid Current PDF object number.
+     * @param bool   $bom If true set the Byte Order Mark (BOM).
+     *
+     * @return string escaped string.
+     *
+     * @throws \Com\Tecnick\Pdf\Encrypt\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function getOutTextString(string $str, int $oid, bool $bom = false): string
+    {
+        if ($this->isunicode) {
+            $str = $this->uniconv->toUTF16BE($str);
+            if ($bom) {
+                $str = "\xFE\xFF" . $str;
+            }
+        }
+
+        return $this->encrypt->escapeDataString($str, $oid);
+    }
+
+    /**
      * Return the program version.
      */
     public function getVersion(): string
     {
         return $this->version;
-    }
-
-    /**
-     * Set a field value only if it is not empty.
-     *
-     * @param string $field Field name
-     * @param string $value Value to set
-     */
-    private function setNonEmptyFieldValue(string $field, string $value): static
-    {
-        if ($value !== '') {
-            $this->$field = $value;
-        }
-
-        return $this;
-    }
-
-    /**
-     * Set the value of an existing array key if it is not empty.
-     *
-     * @param string $field Field array name
-     * @param string $key Key name
-     * @param string $value Value to set
-     */
-    private function setNonEmptyArrayFieldValue(string $field, string $key, string $value): static
-    {
-        $fieldValue = \property_exists($this, $field) ? $this->{$field} : null;
-
-        if (\is_array($fieldValue) && $key !== '' && \array_key_exists($key, $fieldValue) && $value !== '') {
-            $this->{$field}[$key] = $value;
-        }
-
-        return $this;
     }
 
     /**
@@ -97,7 +127,11 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setCreator(string $creator): static
     {
-        return $this->setNonEmptyFieldValue('creator', $creator);
+        if ($creator !== '') {
+            $this->creator = $creator;
+        }
+
+        return $this;
     }
 
     /**
@@ -107,7 +141,11 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setAuthor(string $author): static
     {
-        return $this->setNonEmptyFieldValue('author', $author);
+        if ($author !== '') {
+            $this->author = $author;
+        }
+
+        return $this;
     }
 
     /**
@@ -117,7 +155,11 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setSubject(string $subject): static
     {
-        return $this->setNonEmptyFieldValue('subject', $subject);
+        if ($subject !== '') {
+            $this->subject = $subject;
+        }
+
+        return $this;
     }
 
     /**
@@ -127,7 +169,11 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setTitle(string $title): static
     {
-        return $this->setNonEmptyFieldValue('title', $title);
+        if ($title !== '') {
+            $this->title = $title;
+        }
+
+        return $this;
     }
 
     /**
@@ -137,7 +183,11 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setKeywords(string $keywords): static
     {
-        return $this->setNonEmptyFieldValue('keywords', $keywords);
+        if ($keywords !== '') {
+            $this->keywords = $keywords;
+        }
+
+        return $this;
     }
 
     /**
@@ -277,6 +327,8 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      * @param int $oid  Current PDF object number.
      *
      * @return string escaped date-time string.
+     *
+     * @throws \Com\Tecnick\Pdf\Encrypt\Exception
      */
     protected function getOutDateTimeString(int $time, int $oid): string
     {
@@ -290,6 +342,9 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
     /**
      * Get the PDF output string for the Document Information Dictionary.
      * (ref. Chapter 14.3.3 Document Information Dictionary of PDF32000_2008.pdf).
+     *
+     * @throws \Com\Tecnick\Pdf\Encrypt\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
      */
     protected function getOutMetaInfo(): string
     {
@@ -360,13 +415,29 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
      */
     public function setCustomXMP(string $key, string $xmp): static
     {
-        return $this->setNonEmptyArrayFieldValue('custom_xmp', $key, $xmp);
+        if ($key === '' || $xmp === '') {
+            return $this;
+        }
+
+        switch ($key) {
+            case 'x:xmpmeta':
+            case 'x:xmpmeta.rdf:RDF':
+            case 'x:xmpmeta.rdf:RDF.rdf:Description':
+            case 'x:xmpmeta.rdf:RDF.rdf:Description.pdfaExtension:schemas':
+            case 'x:xmpmeta.rdf:RDF.rdf:Description.pdfaExtension:schemas.rdf:Bag':
+                $this->custom_xmp[$key] = $xmp;
+                break;
+        }
+
+        return $this;
     }
 
     /**
      * Get the PDF output string for the XMP data object
      *
      * @SuppressWarnings("PHPMD.ExcessiveMethodLength")
+     *
+     * @throws \Com\Tecnick\Unicode\Exception
      */
     protected function getOutXMP(): string
     {
@@ -551,7 +622,8 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
 
         if ($this->pdfuaMode !== '') {
             $part = 1;
-            if (\preg_match('/^pdfua([12])$/', $this->pdfuaMode, $matches) === 1) {
+            $matches = [];
+            if (\preg_match('/^pdfua([12])$/', $this->pdfuaMode, $matches) === 1 && isset($matches[1])) {
                 $part = (int) $matches[1];
             }
 
@@ -811,10 +883,10 @@ abstract class MetaInfo extends \Com\Tecnick\Pdf\HTML
     protected function getPageBoxName(string $name): string
     {
         $box = 'CropBox';
-        if (isset($this->viewerpref[$name])) {
-            $val = $this->viewerpref[$name];
-            if (isset($this->page->{$box}[$val]) && \is_string($this->page->{$box}[$val])) {
-                $box = $this->page->{$box}[$val];
+        if (isset($this->viewerpref[$name]) && \is_string($this->viewerpref[$name])) {
+            $lookup = \strtolower($this->viewerpref[$name]);
+            if (isset(self::VALID_PAGE_BOXES[$lookup])) {
+                $box = self::VALID_PAGE_BOXES[$lookup];
             }
         }
 
