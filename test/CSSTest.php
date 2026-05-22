@@ -160,7 +160,7 @@ class CSSTest extends TestUtil
         $this->assertGreaterThan(0.0, $out['lineWidth']);
         $this->assertSame(3, $out['dashPhase']);
         $this->assertIsString($out['lineColor']);
-        $this->assertStringContainsString('rgba(', $out['lineColor']);
+        $this->assertStringContainsString('rgb(', $out['lineColor']);
     }
 
     /** @throws \Throwable */
@@ -173,14 +173,14 @@ class CSSTest extends TestUtil
         $this->assertGreaterThan(0.0, $two['lineWidth']);
         $this->assertIsString($two['lineColor']);
         $twoLineColor = $two['lineColor'];
-        $this->assertStringContainsString('rgba(', $twoLineColor);
+        $this->assertStringContainsString('rgb(', $twoLineColor);
 
         $one = $obj->exposeGetCSSBorderStyle('solid');
         $this->assertSame(0, $one['dashPhase']);
         $this->assertGreaterThan(0.0, $one['lineWidth']);
         $this->assertIsString($one['lineColor']);
         $oneLineColor = $one['lineColor'];
-        $this->assertStringContainsString('rgba(', $oneLineColor);
+        $this->assertStringContainsString('rgb(', $oneLineColor);
 
         $none = $obj->exposeGetCSSBorderStyle('none');
         $this->assertSame(0, $none['lineWidth']);
@@ -199,7 +199,7 @@ class CSSTest extends TestUtil
         $this->assertGreaterThan(0.0, $importantOnly['lineWidth']);
         $this->assertIsString($importantOnly['lineColor']);
         $lineColor = $importantOnly['lineColor'];
-        $this->assertStringContainsString('rgba(', $lineColor);
+        $this->assertStringContainsString('rgb(', $lineColor);
     }
 
     /** @throws \Throwable */
@@ -433,6 +433,20 @@ class CSSTest extends TestUtil
     }
 
     /** @throws \Throwable */
+    public function testExtractCSSpropertiesPreservesPlannedProperties(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $css = '.probe{font-size-adjust:0.59;font-variant:small-caps;orphans:5;page:chapter;quotes:"[" "]";widows:4;}';
+
+        $out = $this->normalizeSelectorMap($obj->exposeExtractCSSproperties($css));
+
+        $this->assertSame(
+            'font-size-adjust:0.59;font-variant:small-caps;orphans:5;page:chapter;quotes:"[" "]";widows:4;',
+            $out['.probe'] ?? null,
+        );
+    }
+
+    /** @throws \Throwable */
     public function testImplodeCSSDataPrefersLastDuplicateCommand(): void
     {
         $obj = $this->getInternalTestObject();
@@ -503,6 +517,27 @@ class CSSTest extends TestUtil
         $this->assertSame($expected, $out, $name);
     }
 
+    /** @throws \Throwable */
+    public function testImplodeCSSDataPreservesPlannedPropertiesAndImportance(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $css = [
+            ['c' => 'font-size-adjust:0.55;font-variant:normal;orphans:2;page:auto;quotes:none;widows:2;'],
+            ['c' => 'font-variant:small-caps !important;orphans:5;page:chapter;quotes:"[" "]";widows:4;'],
+            ['c' => 'font-variant:normal;'],
+        ];
+
+        $out = \str_replace(' ', '', $obj->exposeImplodeCSSData($css));
+
+        $this->assertStringContainsString('font-size-adjust:0.55;', $out);
+        $this->assertStringContainsString('font-variant:small-caps!important;', $out);
+        $this->assertStringNotContainsString('font-variant:normal;', $out);
+        $this->assertStringContainsString('orphans:5;', $out);
+        $this->assertStringContainsString('page:chapter;', $out);
+        $this->assertStringContainsString('quotes:"[""]";', $out);
+        $this->assertStringContainsString('widows:4;', $out);
+    }
+
     /** @return array<string, array{0: string, 1: list<string>, 2: string}> */
     public static function cssCascadeImportantSourceOrderProvider(): array
     {
@@ -570,6 +605,20 @@ class CSSTest extends TestUtil
     }
 
     /** @throws \Throwable */
+    public function testGetCSSArrayFromHTMLPreservesPlannedPropertiesFromStyleTag(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $html = '<style>.probe{font-size-adjust:0.59;font-variant:small-caps;orphans:5;page:chapter;quotes:"[" "]";widows:4;}</style>';
+
+        $out = $this->normalizeSelectorMap($obj->exposeGetCSSArrayFromHTML($html));
+
+        $this->assertSame(
+            'font-size-adjust:0.59;font-variant:small-caps;orphans:5;page:chapter;quotes:"[" "]";widows:4;',
+            $out['.probe'] ?? null,
+        );
+    }
+
+    /** @throws \Throwable */
     public function testGetCSSColorNormalizesValidColor(): void
     {
         $obj = $this->getInternalTestObject();
@@ -577,7 +626,7 @@ class CSSTest extends TestUtil
         $out = $obj->exposeGetCSSColor('#ff0000');
 
         $this->assertNotSame('', $out);
-        $this->assertStringContainsString('rgba(', $out);
+        $this->assertStringContainsString('rgb(', $out);
     }
 
     /** @throws \Throwable */
