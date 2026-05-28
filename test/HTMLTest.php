@@ -2352,45 +2352,80 @@ class HTMLTest extends TestUtil
     }
 
     /**
+     * @return array{count:int, markerPage:int}
+     *
+     * @throws \Throwable
+     */
+    private function renderNestedBreakBeforeScenario(string $breakSide, string $marker): array
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $html =
+            '<div>INTRO</div>'
+            . '<div><section><p style="break-before:'
+            . $breakSide
+            . '">'
+            . $marker
+            . '</p></section></div>'
+            . '<div>OUTRO</div>';
+
+        $obj->addHTMLCell($html, 0, 0, 60, 0);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $pages = $page->getPages();
+        $markerPage = 0;
+        foreach ($pages as $idx => $pdata) {
+            $content = \implode("\n", $pdata['content']);
+            if (\strpos($content, $marker) !== false) {
+                $markerPage = $idx + 1;
+                break;
+            }
+        }
+
+        return [
+            'count' => \count($pages),
+            'markerPage' => $markerPage,
+        ];
+    }
+
+    /** @throws \Throwable */
+    private function measureWrappedLineHeightDelta(string $text, string $lineHeight): float
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+        $obj->exposeResetBBoxTrace();
+
+        $html = '<p style="line-height:' . $lineHeight . ';">' . $text . '</p>';
+        $obj->getHTMLCell($html, 20, 30, 20, 0);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertNotSame([], $trace);
+
+        assert(isset($trace[0]), "\$trace[0] must be set");
+        $first = $trace[0];
+        $this->assertGreaterThan(0.0, $first['bbox_h']);
+
+        // getTextCell reports the bbox of the last visual line when wrapping;
+        // use vertical delta from input y to that last line to measure run height.
+        $deltaY = $first['bbox_y'] - $first['in_y'];
+        $this->assertGreaterThan(
+            $first['font_size'] + 0.1,
+            $deltaY,
+            'Expected wrapped text sample to span multiple lines.',
+        );
+
+        return $deltaY;
+    }
+
+    /**
      * @throws \Throwable
      */
     public function testGetHTMLCellNestedBreakBeforeLeftRightConsistency(): void
     {
-        $render = function (string $breakSide, string $marker): array {
-            $obj = $this->getTestObject();
-            $this->initFontAndPage($obj);
-
-            $html =
-                '<div>INTRO</div>'
-                . '<div><section><p style="break-before:'
-                . $breakSide
-                . '">'
-                . $marker
-                . '</p></section></div>'
-                . '<div>OUTRO</div>';
-
-            $obj->addHTMLCell($html, 0, 0, 60, 0);
-
-            /** @var \Com\Tecnick\Pdf\Page\Page $page */
-            $page = $this->getObjectProperty($obj, 'page');
-            $pages = $page->getPages();
-            $markerPage = 0;
-            foreach ($pages as $idx => $pdata) {
-                $content = \implode("\n", $pdata['content']);
-                if (\strpos($content, $marker) !== false) {
-                    $markerPage = $idx + 1;
-                    break;
-                }
-            }
-
-            return [
-                'count' => \count($pages),
-                'markerPage' => $markerPage,
-            ];
-        };
-
-        $left = $render('left', 'LEFT-NESTED-MARK');
-        $right = $render('right', 'RIGHT-NESTED-MARK');
+        $left = $this->renderNestedBreakBeforeScenario('left', 'LEFT-NESTED-MARK');
+        $right = $this->renderNestedBreakBeforeScenario('right', 'RIGHT-NESTED-MARK');
 
         $this->assertGreaterThan(1, $left['count']);
         $this->assertGreaterThan(1, $right['count']);
@@ -5521,35 +5556,8 @@ class HTMLTest extends TestUtil
             'Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa '
             . 'Alfa Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliett Kilo Lima Mike November Oscar Papa';
 
-        $measureHeight = function (string $lineHeight) use ($text): float {
-            $obj = $this->getBBoxProbeTestObject();
-            $this->initFontAndPage($obj);
-            $obj->exposeResetBBoxTrace();
-
-            $html = '<p style="line-height:' . $lineHeight . ';">' . $text . '</p>';
-            $obj->getHTMLCell($html, 20, 30, 20, 0);
-
-            $trace = $obj->exposeGetBBoxTrace();
-            $this->assertNotSame([], $trace);
-
-            assert(isset($trace[0]), "\$trace[0] must be set");
-            $first = $trace[0];
-            $this->assertGreaterThan(0.0, $first['bbox_h']);
-
-            // getTextCell reports the bbox of the last visual line when wrapping;
-            // use vertical delta from input y to that last line to measure run height.
-            $deltaY = $first['bbox_y'] - $first['in_y'];
-            $this->assertGreaterThan(
-                $first['font_size'] + 0.1,
-                $deltaY,
-                'Expected wrapped text sample to span multiple lines.',
-            );
-
-            return $deltaY;
-        };
-
-        $height100 = $measureHeight('100%');
-        $height200 = $measureHeight('200%');
+        $height100 = $this->measureWrappedLineHeightDelta($text, '100%');
+        $height200 = $this->measureWrappedLineHeightDelta($text, '200%');
 
         $this->assertGreaterThan(
             $height100 + 1.0,
@@ -9463,6 +9471,114 @@ class HTMLTest extends TestUtil
 
         $this->assertGreaterThan(0.0, $middleOffset);
         $this->assertGreaterThan($middleOffset, $bottomOffset);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLCellVerticallyCentersContentInFixedHeightTableScenarios(): void
+    {
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFontAndPage($obj);
+
+        $cases = [
+            [
+                'label' => 'div wrapper with 100% table height',
+                'posx' => 20.0,
+                'posy' => 20.0,
+                'width' => 150.0,
+                'height' => 0.0,
+                'containerTop' => 20.0,
+                'containerHeight' => 90.0,
+                'html' =>
+                    '<style>'
+                        . '.vc-box{width:150mm;height:90mm;border:0.6mm solid #003366;background-color:#e9f2ff;}'
+                        . '.vc-fill{width:100%;height:100%;}'
+                        . '.vc-content{vertical-align:middle;text-align:center;color:#002244;}'
+                        . '</style>'
+                        . '<div class="vc-box">'
+                        . '<table class="vc-fill" border="0" cellpadding="0" cellspacing="0">'
+                        . '<tr><td class="vc-content">'
+                        . '<h1>Vertically Centered Block</h1>'
+                        . '<p>This content is centered in the middle of the box.</p>'
+                        . '<p><b>HTML:</b> headings, paragraphs, and inline formatting.</p>'
+                        . '</td></tr></table></div>',
+            ],
+            [
+                'label' => 'explicit table and cell height',
+                'posx' => 20.0,
+                'posy' => 120.0,
+                'width' => 150.0,
+                'height' => 100.0,
+                'containerTop' => 120.0,
+                'containerHeight' => 100.0,
+                'html' =>
+                    '<table border="1" cellpadding="0" cellspacing="0" '
+                        . 'style="width:150mm;height:100mm;background-color:blue;border-color:#003366;">'
+                        . '<tr><td style="height:100mm;vertical-align:middle;text-align:center;color:cmyk(100,0,0,0);">'
+                        . '<h1>Vertically Centered Block</h1>'
+                        . '<p>This content is centered in the middle of the box.</p>'
+                        . '<p><b>HTML:</b> headings, paragraphs, and inline formatting.</p>'
+                        . '</td></tr></table>',
+            ],
+        ];
+
+        foreach ($cases as $case) {
+            $obj->exposeResetBBoxTrace();
+            $out = $obj->getHTMLCell($case['html'], $case['posx'], $case['posy'], $case['width'], $case['height']);
+
+            $this->assertNotSame('', $out, $case['label']);
+
+            $trace = $obj->exposeGetBBoxTrace();
+            $this->assertNotSame([], $trace, $case['label'] . ': expected captured text bboxes');
+
+            $firstTop = null;
+            $lastBottom = null;
+            foreach ($trace as $entry) {
+                $bboxY = $entry['bbox_y'];
+                $bboxH = $entry['bbox_h'];
+
+                $bboxBottom = $bboxY + $bboxH;
+                $firstTop = $firstTop === null ? $bboxY : \min($firstTop, $bboxY);
+                $lastBottom = $lastBottom === null ? $bboxBottom : \max($lastBottom, $bboxBottom);
+            }
+
+            $this->assertNotNull($firstTop, $case['label'] . ': expected valid bbox top');
+            $this->assertNotNull($lastBottom, $case['label'] . ': expected valid bbox bottom');
+
+            $cmMatches = [];
+            \preg_match_all('/1 0 0 1 0 (-?[0-9.]+) cm\\n/', $out, $cmMatches);
+            $translatePt = 0.0;
+            foreach ($cmMatches[1] ?? [] as $match) {
+                if (!\is_numeric($match)) {
+                    continue;
+                }
+
+                $ypt = (float) $match;
+                if (\abs($ypt) > \abs($translatePt)) {
+                    $translatePt = $ypt;
+                }
+            }
+
+            $translateMm = -$obj->toUnit($translatePt);
+            $this->assertGreaterThan(
+                20.0,
+                $translateMm,
+                $case['label'] . ': expected a substantial middle-valign translate offset in mm mode',
+            );
+            $effectiveTop = $firstTop + $translateMm;
+            $effectiveBottom = $lastBottom + $translateMm;
+            $topSpace = $effectiveTop - $case['containerTop'];
+            $bottomSpace = $case['containerTop'] + $case['containerHeight'] - $effectiveBottom;
+
+            $this->assertGreaterThan(0.0, $topSpace, $case['label'] . ': top free space must be positive');
+            $this->assertGreaterThan(0.0, $bottomSpace, $case['label'] . ': bottom free space must be positive');
+            $this->assertLessThan(
+                6.0,
+                \abs($topSpace - $bottomSpace),
+                $case['label'] . ': expected near-centered top/bottom free space',
+            );
+        }
     }
 
     /**

@@ -41,14 +41,9 @@ class ResourceClonerTest extends TestCase
     {
         $src = $this->createStub(SourceDocument::class);
 
-        $src->method('getObject')->willReturnCallback(static function (string $ref) use ($objects): array {
-            if (!isset($objects[$ref]) || !\is_array($objects[$ref])) {
-                throw new ImportCorruptedSourceException('Object not found in mock source: ' . $ref);
-            }
-
-            /** @var array<int, mixed> */
-            return $objects[$ref];
-        });
+        $src->method('getObject')->willReturnCallback(static fn(string $ref): array => (
+            isset($objects[$ref]) && \is_array($objects[$ref]) ? $objects[$ref] : []
+        ));
 
         $src->method('findObject')->willReturnCallback(static fn(string $ref): ?array => isset($objects[$ref])
             && \is_array($objects[$ref])
@@ -538,6 +533,44 @@ class ResourceClonerTest extends TestCase
         $this->assertStringContainsString('/Nums [1 2]', $flushed);
         $this->assertStringContainsString('/Kind /Subtype', $flushed);
         $this->assertMatchesRegularExpression('/\/Ref \d+ 0 R/', $flushed);
+    }
+
+    /**
+     * Regression: tc-lib-pdf-parser tags literal-string dictionary values with
+     * the open-paren byte `(` and hex-string values with `<` — NOT the legacy
+     * `'string'` / `'hex'` literals that the original `serializeValue()` checked
+     * for. Before the fix these values fell through to the bare-scalar path and
+     * were emitted without their `( )` / `< >` delimiters, producing malformed
+     * PDF dictionaries such as `/FontFamily Futura PT Book` instead of
+     * `/FontFamily (Futura PT Book)`. This test mirrors
+     * testEnqueueObjectSerializesDictionaryValuesAcrossTokenTypes above but
+     * uses the parser's actual token tags.
+     *
+     * @throws \Throwable
+     */
+    public function testEnqueueObjectPreservesDelimitersForRealParserTokenTags(): void
+    {
+        $src = $this->makeMockSourceDocument([
+            '1_0' => [
+                [
+                    '<<',
+                    [
+                        ['/', 'FontFamily'],
+                        ['(', 'Futura PT Book'],
+                        ['/', 'CIDSet'],
+                        ['<', 'CAFE'],
+                    ],
+                ],
+            ],
+        ]);
+        $map = new ObjectMap();
+        $cloner = new ResourceCloner(0);
+
+        $cloner->enqueueObject('1_0', $src, $map);
+        $flushed = $map->flush();
+
+        $this->assertStringContainsString('/FontFamily (Futura PT Book)', $flushed);
+        $this->assertStringContainsString('/CIDSet <CAFE>', $flushed);
     }
 
     /** @throws \Throwable */
