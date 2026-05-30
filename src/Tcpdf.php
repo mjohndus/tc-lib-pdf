@@ -404,7 +404,12 @@ class Tcpdf extends \Com\Tecnick\Pdf\Output
         if (!empty($style[1])) {
             $out .= $this->graph->getStyleCmd($style[1]);
             foreach ($sbars as $bar) {
-                $out .= $this->graph->getBasicRect(($posx + $bar[0]), ($posy + $bar[1]), $bar[2], $bar[3], 'f');
+                /** @var array{0: numeric, 1: numeric, 2: numeric, 3: numeric} $bar */
+                $x = (float) $bar[0];
+                $y = (float) $bar[1];
+                $w = (float) $bar[2];
+                $h = (float) $bar[3];
+                $out .= $this->graph->getBasicRect($posx + $x, $posy + $y, $w, $h, 'f');
             }
         }
 
