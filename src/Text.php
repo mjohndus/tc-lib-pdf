@@ -143,6 +143,18 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     ];
 
     /**
+     * Default empty bounding box value.
+     *
+     * @var TBBox
+     */
+    protected const BBOX_DEFAULT = [
+        'x' => 0.0,
+        'y' => 0.0,
+        'w' => 0.0,
+        'h' => 0.0,
+    ];
+
+    /**
      * If true, ZERO-WIDTH-SPACE characters are automatically added
      * to the text to allow line breaking after some non-letter characters.
      *
@@ -838,6 +850,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      *
      * Typical usage is for repeated page furniture (header/footer/page numbers),
      * decorative graphics, separators, and similar visual-only content.
+     * This method returns the opening PDF operators and does not write them to
+     * the current page automatically. To persist the artifact block, append the
+     * returned string with page->addContent(...) or use addArtifactContent().
      *
      * @param string $type    Optional Artifact /Type name (for example 'Pagination').
      * @param string $subtype Optional Artifact /Subtype name (for example 'Header' or 'Footer').
@@ -868,6 +883,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
     /**
      * Close an Artifact marked-content block opened by beginArtifact().
+     *
+     * Like beginArtifact(), this returns raw PDF operators and must be appended
+     * to the page content explicitly when using the low-level API.
      */
     public function endArtifact(): string
     {
@@ -880,6 +898,9 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
     /**
      * Add non-semantic content wrapped as Artifact marked-content.
+     *
+     * This is the preferred API for decorative graphics and page furniture
+     * because it writes the wrapped content directly to the selected page.
      *
      * @param string $content Raw PDF operators to wrap.
      * @param int    $pid     Page index.
@@ -2416,24 +2437,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     public function getLastBBox(): array
     {
         if ($this->bbox === []) {
-            return [
-                'x' => 0.0,
-                'y' => 0.0,
-                'w' => 0.0,
-                'h' => 0.0,
-            ];
+            return self::BBOX_DEFAULT;
         }
         $idx = \count($this->bbox) - 1;
         $item = $this->bbox[$idx] ?? null;
         if ($item !== null) {
             return $item;
         }
-        return [
-            'x' => 0.0,
-            'y' => 0.0,
-            'w' => 0.0,
-            'h' => 0.0,
-        ];
+        return self::BBOX_DEFAULT;
     }
 
     /**
@@ -2444,24 +2455,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     public function getLastTextBBox(): array
     {
         if ($this->textbbox === []) {
-            return [
-                'x' => 0.0,
-                'y' => 0.0,
-                'w' => 0.0,
-                'h' => 0.0,
-            ];
+            return self::BBOX_DEFAULT;
         }
         $idx = \count($this->textbbox) - 1;
         $item = $this->textbbox[$idx] ?? null;
         if ($item !== null) {
             return $item;
         }
-        return [
-            'x' => 0.0,
-            'y' => 0.0,
-            'w' => 0.0,
-            'h' => 0.0,
-        ];
+        return self::BBOX_DEFAULT;
     }
 
     /**
@@ -2472,24 +2473,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     public function getLastCellBBox(): array
     {
         if ($this->cellbbox === []) {
-            return [
-                'x' => 0.0,
-                'y' => 0.0,
-                'w' => 0.0,
-                'h' => 0.0,
-            ];
+            return self::BBOX_DEFAULT;
         }
         $idx = \count($this->cellbbox) - 1;
         $item = $this->cellbbox[$idx] ?? null;
         if ($item !== null) {
             return $item;
         }
-        return [
-            'x' => 0.0,
-            'y' => 0.0,
-            'w' => 0.0,
-            'h' => 0.0,
-        ];
+        return self::BBOX_DEFAULT;
     }
 
     /**
