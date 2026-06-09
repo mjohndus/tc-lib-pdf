@@ -211,7 +211,7 @@ class TcpdfTest extends TestUtil
         /** @var \Com\Tecnick\Pdf\Image\Import $image */
         $image = $this->getObjectProperty($obj, 'image');
         /** @var \Com\Tecnick\File\File $imageFile */
-        $imageFile = $this->getObjectProperty($image, 'file');
+        $imageFile = $this->getObjectProperty($image, 'fileHelper');
 
         $this->assertSame($allowedHosts, $this->getObjectProperty($file, 'allowedHosts'));
         $this->assertSame($defaultCurlOpts, $this->getObjectProperty($file, 'defaultCurlOpts'));
@@ -219,6 +219,55 @@ class TcpdfTest extends TestUtil
         $this->assertSame($allowedHosts, $this->getObjectProperty($imageFile, 'allowedHosts'));
         $this->assertSame($defaultCurlOpts, $this->getObjectProperty($imageFile, 'defaultCurlOpts'));
         $this->assertSame($fixedCurlOpts, $this->getObjectProperty($imageFile, 'fixedCurlOpts'));
+
+        /** @var array<string> $allowedPaths */
+        $allowedPaths = $this->getObjectProperty($file, 'allowedPaths');
+        $this->assertContains((string) \realpath(__DIR__ . '/..'), $allowedPaths);
+    }
+
+    /** @throws \Throwable */
+    public function testConstructorUsesCustomAllowedPathsWithoutMergingDefaults(): void
+    {
+        $customDir = (string) \realpath(__DIR__ . '/fixtures');
+        $obj = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, '', null, [
+            'allowedPaths' => [$customDir],
+        ]);
+
+        /** @var \Com\Tecnick\File\File $file */
+        $file = $this->getObjectProperty($obj, 'file');
+        /** @var array<string> $allowedPaths */
+        $allowedPaths = $this->getObjectProperty($file, 'allowedPaths');
+
+        $this->assertNotContains((string) \realpath(__DIR__ . '/..'), $allowedPaths);
+        $this->assertContains($customDir, $allowedPaths);
+    }
+
+    /** @throws \Throwable */
+    public function testConstructorUsesMarkupAllowedPathsFallbackAndOverride(): void
+    {
+        $customDir = (string) \realpath(__DIR__ . '/fixtures');
+        $markupDir = (string) \realpath(__DIR__ . '/..');
+
+        $fallback = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, '', null, [
+            'allowedPaths' => [$customDir],
+        ]);
+
+        /** @var \Com\Tecnick\File\File $fallbackMarkupFile */
+        $fallbackMarkupFile = $this->getObjectProperty($fallback, 'markupFile');
+        /** @var array<string> $fallbackMarkupPaths */
+        $fallbackMarkupPaths = $this->getObjectProperty($fallbackMarkupFile, 'allowedPaths');
+        $this->assertSame([$customDir], $fallbackMarkupPaths);
+
+        $override = new \Com\Tecnick\Pdf\Tcpdf('mm', true, false, true, '', null, [
+            'allowedPaths' => [$customDir],
+            'markupAllowedPaths' => [$markupDir],
+        ]);
+
+        /** @var \Com\Tecnick\File\File $overrideMarkupFile */
+        $overrideMarkupFile = $this->getObjectProperty($override, 'markupFile');
+        /** @var array<string> $overrideMarkupPaths */
+        $overrideMarkupPaths = $this->getObjectProperty($overrideMarkupFile, 'allowedPaths');
+        $this->assertSame([$markupDir], $overrideMarkupPaths);
     }
 
     /** @throws \Throwable */

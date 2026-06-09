@@ -139,7 +139,9 @@ use Com\Tecnick\Unicode\Convert as ObjUniConvert;
  *   maxRemoteSize?: int,
  *   curlopts?: array<int, bool|int|string>,
  *   defaultCurlOpts?: array<int, bool|int|string>,
- *   fixedCurlOpts?: array<int, bool|int|string>
+ *   fixedCurlOpts?: array<int, bool|int|string>,
+ *   allowedPaths?: array<string>,
+ *   markupAllowedPaths?: array<string>
  * }
  *
  * @phpstan-type TFourFloat array{
@@ -693,7 +695,7 @@ abstract class Base
     /**
      * TCPDF version.
      */
-    protected string $version = '8.36.0';
+    protected string $version = '8.39.0';
 
     /**
      * Encrypt object.
@@ -714,6 +716,11 @@ abstract class Base
      * File object.
      */
     public ObjFile $file;
+
+    /**
+     * File object for markup-originated resources.
+     */
+    public ObjFile $markupFile;
 
     /**
      * Cache object.
@@ -1543,6 +1550,109 @@ abstract class Base
     }
 
     /**
+     * Returns the default array of allowed file paths.
+     *
+     * @return array<string>
+     */
+    public function defaultFileAllowedPaths(): array
+    {
+        return $this->buildDefaultAllowedPaths(true);
+    }
+
+    /**
+     * Returns the default array of allowed file paths for markup-originated resources.
+     *
+     * @return array<string>
+     */
+    public function defaultMarkupAllowedPaths(): array
+    {
+        return $this->buildDefaultAllowedPaths(false);
+    }
+
+    /**
+     * Returns the default array of allowed file paths.
+     *
+     * @return array<string>
+     */
+    protected function buildDefaultAllowedPaths(bool $includeSystemTemp): array
+    {
+        $allowedPaths = [];
+
+        $candidatePaths = [__DIR__ . '/../', __DIR__ . '/../../../vendor/tecnickcom/'];
+
+        if ($includeSystemTemp) {
+            \array_unshift($candidatePaths, \sys_get_temp_dir());
+        }
+
+        if (\defined('K_PATH_FONTS') && \is_string(\constant('K_PATH_FONTS'))) {
+            $this->appendResolvedAllowedPath($allowedPaths, \constant('K_PATH_FONTS'));
+        }
+
+        foreach ($candidatePaths as $candidatePath) {
+            $this->appendResolvedAllowedPath($allowedPaths, $candidatePath);
+        }
+
+        return \array_values(\array_unique($allowedPaths));
+    }
+
+    /**
+     * Add an image using the markup resource file helper.
+     *
+     * @throws \Com\Tecnick\File\Exception
+     * @throws PdfException
+     * @throws \Com\Tecnick\Pdf\Image\Exception
+     */
+    protected function addMarkupImage(string $source): int
+    {
+        return $this->image->withFileHelper(
+            $this->markupFile,
+            /**
+             * @throws \Com\Tecnick\File\Exception
+             * @throws \Com\Tecnick\Pdf\Image\Exception
+             */
+            fn(): int => $this->image->add($source),
+        );
+    }
+
+    /**
+     * Add a resized image using the markup resource file helper.
+     *
+     * @throws \Com\Tecnick\File\Exception
+     * @throws PdfException
+     * @throws \Com\Tecnick\Pdf\Image\Exception
+     */
+    protected function addMarkupImageResized(string $source, int $width, int $height): int
+    {
+        return $this->image->withFileHelper(
+            $this->markupFile,
+            /**
+             * @throws \Com\Tecnick\File\Exception
+             * @throws \Com\Tecnick\Pdf\Image\Exception
+             */
+            fn(): int => $this->image->add($source, $width, $height),
+        );
+    }
+
+    /**
+     * Resolve a candidate path and append it when it maps to a non-empty local path.
+     *
+     * @param array<string> $allowedPaths
+     */
+    protected function appendResolvedAllowedPath(array &$allowedPaths, mixed $candidatePath): void
+    {
+        if (!\is_string($candidatePath) || $candidatePath === '') {
+            return;
+        }
+
+        $realPath = \realpath($candidatePath);
+        if (!\is_string($realPath) || $realPath === '') {
+            return;
+        }
+
+        $allowedPaths[] = $realPath;
+    }
+
+    /**
      * Return the current temporary RTL status.
      *
      * @return bool
@@ -1659,7 +1769,8 @@ abstract class Base
      *                                         security reasons remote URL loading is DISABLED by
      *                                         default; you MUST populate this list (for example
      *                                         ['example.com', 'cdn.example.com']) to enable any
-     *                                         remote download. Local file paths are not affected.
+     *                                         remote download. Local file reads are controlled
+     *                                         separately by allowedPaths.
      *                                       - maxRemoteSize (int): Maximum size in bytes accepted
      *                                         for a remote download (default 52428800 = 50 MiB).
      *                                       - curlopts (array<int,bool|int|string>): Per-request
@@ -1672,6 +1783,15 @@ abstract class Base
      *                                         options that are always enforced and cannot be
      *                                         overridden by curlopts (for example to pin TLS
      *                                         settings).
+     *                                       - allowedPaths (string[]): Trusted local path
+     *                                         prefixes for file:// reads. Defaults are
+     *                                         automatically computed from the package location
+     *                                         to cover bundled example assets.
+     *                                       - markupAllowedPaths (string[]): Trusted local path
+     *                                         prefixes for resources referenced by rendered
+     *                                         HTML/CSS/SVG markup. Defaults exclude the system
+     *                                         temp directory; when omitted, explicit
+     *                                         allowedPaths values are reused for markup too.
      *
      * @throws \Com\Tecnick\Pdf\Encrypt\Exception
      * @throws \Com\Tecnick\Pdf\Page\Exception
@@ -1705,13 +1825,25 @@ abstract class Base
         $this->color = new PdfColor();
         $this->color->setForceDeviceCmyk($this->requiresPdfxDeviceCmyk());
         $this->barcode = new ObjBarcode();
+
         $this->file = new ObjFile(
-            $fileOptions['allowedHosts'] ?? [],
-            $fileOptions['maxRemoteSize'] ?? 52_428_800,
-            $fileOptions['curlopts'] ?? [],
-            $fileOptions['defaultCurlOpts'] ?? null,
-            $fileOptions['fixedCurlOpts'] ?? null,
+            allowedHosts: $fileOptions['allowedHosts'] ?? [],
+            maxRemoteSize: $fileOptions['maxRemoteSize'] ?? 52_428_800,
+            curlopts: $fileOptions['curlopts'] ?? [],
+            defaultCurlOpts: $fileOptions['defaultCurlOpts'] ?? null,
+            fixedCurlOpts: $fileOptions['fixedCurlOpts'] ?? null,
+            allowedPaths: $fileOptions['allowedPaths'] ?? $this->defaultFileAllowedPaths(),
         );
+
+        $this->markupFile = new ObjFile(
+            allowedHosts: $fileOptions['allowedHosts'] ?? [],
+            maxRemoteSize: $fileOptions['maxRemoteSize'] ?? 52_428_800,
+            curlopts: $fileOptions['curlopts'] ?? [],
+            defaultCurlOpts: $fileOptions['defaultCurlOpts'] ?? null,
+            fixedCurlOpts: $fileOptions['fixedCurlOpts'] ?? null,
+            allowedPaths: $fileOptions['markupAllowedPaths'] ?? $fileOptions['allowedPaths'] ?? $this->defaultMarkupAllowedPaths(),
+        );
+
         $this->cache = new ObjCache();
         $this->uniconv = new ObjUniConvert();
 
@@ -1732,8 +1864,20 @@ abstract class Base
             $this->compress,
         );
 
-        $this->font = new ObjFont($this->kunit, $this->subsetfont, $this->isunicode, $pdfamode, $fileOptions);
+        $this->font = new ObjFont(
+            kunit: $this->kunit,
+            subset: $this->subsetfont,
+            unicode: $this->isunicode,
+            pdfa: $pdfamode,
+            fileHelper: $this->file,
+        );
 
-        $this->image = new ObjImage($this->kunit, $this->encrypt, $pdfamode, $this->compress, $fileOptions);
+        $this->image = new ObjImage(
+            kunit: $this->kunit,
+            encrypt: $this->encrypt,
+            fileHelper: $this->file,
+            pdfa: $pdfamode,
+            compress: $this->compress,
+        );
     }
 }

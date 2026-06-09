@@ -13728,6 +13728,63 @@ class HTMLTest extends TestUtil
         $this->assertLessThan($posAppendix, $posChapter);
     }
 
+    /** @throws \Throwable */
+    public function testAddHTMLCellBlocksTempImagesByDefault(): void
+    {
+        $tmpImage = (string) \tempnam(\sys_get_temp_dir(), 'tc-html-img-');
+        \unlink($tmpImage);
+        $tmpImage .= '.png';
+        \copy(__DIR__ . '/../examples/images/tcpdf_cell.png', $tmpImage);
+
+        try {
+            $obj = $this->getTestObject();
+            $this->initFontAndPage($obj);
+
+            $obj->addHTMLCell('<img src="file://' . $tmpImage . '" width="10" height="10"/>', 10, 10, 40, 20);
+
+            /** @var \Com\Tecnick\Pdf\Image\Import $image */
+            $image = $this->getObjectProperty($obj, 'image');
+            /** @var array<int, mixed> $images */
+            $images = $this->getObjectProperty($image, 'image');
+            $this->assertSame([], $images);
+        } finally {
+            if (\file_exists($tmpImage)) {
+                \unlink($tmpImage);
+            }
+        }
+    }
+
+    /** @throws \Throwable */
+    public function testAddHTMLCellAllowsTempImagesWhenMarkupAllowedPathsConfigured(): void
+    {
+        $tmpImage = (string) \tempnam(\sys_get_temp_dir(), 'tc-html-img-');
+        \unlink($tmpImage);
+        $tmpImage .= '.png';
+        \copy(__DIR__ . '/../examples/images/tcpdf_cell.png', $tmpImage);
+
+        try {
+            $tmpRoot = \realpath(\sys_get_temp_dir());
+            $this->assertIsString($tmpRoot);
+
+            $obj = new \Com\Tecnick\Pdf\Tcpdf(fileOptions: [
+                'markupAllowedPaths' => [$tmpRoot],
+            ]);
+            $this->initFontAndPage($obj);
+
+            $obj->addHTMLCell('<img src="file://' . $tmpImage . '" width="10" height="10"/>', 10, 10, 40, 20);
+
+            /** @var \Com\Tecnick\Pdf\Image\Import $image */
+            $image = $this->getObjectProperty($obj, 'image');
+            /** @var array<int, mixed> $images */
+            $images = $this->getObjectProperty($image, 'image');
+            $this->assertCount(1, $images);
+        } finally {
+            if (\file_exists($tmpImage)) {
+                \unlink($tmpImage);
+            }
+        }
+    }
+
     /**
      * @throws \Throwable
      */
@@ -15833,6 +15890,64 @@ class HTMLTest extends TestUtil
     /**
      * @throws \Throwable
      */
+    public function testGetHTMLCellImgWidthOnlyPreservesIntrinsicAspectRatio(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 2);
+        \imagecolorallocate($img, 255, 255, 255);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $b64src = 'data:image/png;base64,' . \base64_encode((string) $raw);
+
+        $out = $obj->getHTMLCell('<img src="' . $b64src . '" width="20" />', 0, 0, 80, 20);
+
+        $imgMatch = [];
+        $imgPattern = '/q\s+([-0-9.]+)\s+0\s+0\s+([-0-9.]+)\s+[-0-9.]+\s+[-0-9.]+\s+cm\s+\/IMG\d+\s+Do\s+Q/';
+        $this->assertSame(1, \preg_match($imgPattern, $out, $imgMatch));
+        assert(isset($imgMatch[1]), "\$imgMatch[1] must be set");
+        assert(isset($imgMatch[2]), "\$imgMatch[2] must be set");
+
+        $drawWidth = \floatval($imgMatch[1]);
+        $drawHeight = \floatval($imgMatch[2]);
+        $this->assertGreaterThan(0.0, $drawWidth);
+        $this->assertEqualsWithDelta(0.5, $drawHeight / $drawWidth, 0.01);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLCellImgHeightOnlyPreservesIntrinsicAspectRatio(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $img = \imagecreate(4, 2);
+        \imagecolorallocate($img, 255, 255, 255);
+        \ob_start();
+        \imagepng($img);
+        $raw = \ob_get_clean();
+        $b64src = 'data:image/png;base64,' . \base64_encode((string) $raw);
+
+        $out = $obj->getHTMLCell('<img src="' . $b64src . '" height="12" />', 0, 0, 80, 20);
+
+        $imgMatch = [];
+        $imgPattern = '/q\s+([-0-9.]+)\s+0\s+0\s+([-0-9.]+)\s+[-0-9.]+\s+[-0-9.]+\s+cm\s+\/IMG\d+\s+Do\s+Q/';
+        $this->assertSame(1, \preg_match($imgPattern, $out, $imgMatch));
+        assert(isset($imgMatch[1]), "\$imgMatch[1] must be set");
+        assert(isset($imgMatch[2]), "\$imgMatch[2] must be set");
+
+        $drawWidth = \floatval($imgMatch[1]);
+        $drawHeight = \floatval($imgMatch[2]);
+        $this->assertGreaterThan(0.0, $drawHeight);
+        $this->assertEqualsWithDelta(0.5, $drawHeight / $drawWidth, 0.01);
+    }
+
+    /**
+     * @throws \Throwable
+     */
     public function testGetHTMLCellImgBottomAlignmentUsesTextBaseline(): void
     {
         $obj = $this->getTestObject();
@@ -16769,6 +16884,33 @@ class HTMLTest extends TestUtil
         $this->assertStringContainsString('err', $out);
     }
 
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLCellResolvesRelativeImagePathFromScriptFilename(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $previousScriptFilename = $_SERVER['SCRIPT_FILENAME'];
+        $_SERVER['SCRIPT_FILENAME'] = (string) \realpath(__DIR__ . '/../examples/E043_html_tables.php');
+
+        try {
+            $out = $obj->getHTMLCell(
+                '<img src="images/tcpdf_logo.jpg" alt="should-not-fallback" width="60" height="20" />',
+                0,
+                0,
+                20,
+                10,
+            );
+
+            $this->assertNotSame('', $out);
+            $this->assertStringNotContainsString('should-not-fallback', $out);
+        } finally {
+            $_SERVER['SCRIPT_FILENAME'] = $previousScriptFilename;
+        }
+    }
+
     // --- Fix tests: setHtmlVSpace() ---
 
     /**
@@ -16825,6 +16967,63 @@ class HTMLTest extends TestUtil
 
         $this->assertNotSame('', $out);
         $this->assertStringContainsString('spacing test', $out);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testHtmlImageImportResizeDisabledDoesNotResolveRasterImportDimensions(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $imgpath = \realpath(__DIR__ . '/../examples/images/tcpdf_logo.jpg');
+        $this->assertNotFalse($imgpath);
+        $src = $imgpath;
+
+        $dims = $obj->exposeGetHTMLRasterImportDimensions($src, 12.7, 12.7);
+        $this->assertNull($dims);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testHtmlImageImportResizeEnabledResolvesDownscaledRasterImportDimensions(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+        $obj->setHtmlImageImportResize(true);
+
+        $imgpath = \realpath(__DIR__ . '/../examples/images/tcpdf_logo.jpg');
+        $this->assertNotFalse($imgpath);
+        $src = $imgpath;
+
+        $dims = $obj->exposeGetHTMLRasterImportDimensions($src, 0.5, 0.5);
+        $this->assertIsArray($dims);
+        $this->assertGreaterThan(0, $dims['width']);
+        $this->assertGreaterThan(0, $dims['height']);
+        $this->assertLessThan(300, $dims['width']);
+        $this->assertLessThan(100, $dims['height']);
+
+        $upscaled = $obj->exposeGetHTMLRasterImportDimensions($src, 500.0, 500.0);
+        $this->assertNull($upscaled);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testHtmlImageImportResizeEnabledSkipsSvgSources(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+        $obj->setHtmlImageImportResize(true);
+
+        $dims = $obj->exposeGetHTMLRasterImportDimensions(
+            '@<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+            12.7,
+            12.7,
+        );
+        $this->assertNull($dims);
     }
 
     /**
@@ -16958,6 +17157,17 @@ class HTMLTest extends TestUtil
         $this->assertSame('', $obj->exposeGetHTMLListImageMarkerType(''));
         $this->assertSame('', $obj->exposeGetHTMLListImageMarkerType('not-a-url'));
         $this->assertStringStartsWith('img|png|', $obj->exposeGetHTMLListImageMarkerType('url(icon.png)'));
+        $prevScriptFilename = $_SERVER['SCRIPT_FILENAME'];
+        $_SERVER['SCRIPT_FILENAME'] = (string) \realpath(__DIR__ . '/../examples/E043_html_tables.php');
+        try {
+            $resolvedMarker = $obj->exposeGetHTMLListImageMarkerType('url(images/tcpdf_logo.jpg)');
+            $this->assertStringContainsString(
+                (string) \realpath(__DIR__ . '/../examples/images/tcpdf_logo.jpg'),
+                $resolvedMarker,
+            );
+        } finally {
+            $_SERVER['SCRIPT_FILENAME'] = $prevScriptFilename;
+        }
         $this->assertStringStartsWith(
             'img|svg|',
             $obj->exposeGetHTMLListImageMarkerType('url(data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)'),
