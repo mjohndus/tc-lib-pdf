@@ -4578,6 +4578,208 @@ class HTMLTest extends TestUtil
     }
 
     /**
+     * Build a two-column page layout on the given object and return the
+     * geometry shared by the column-break re-anchor tests.
+     *
+     * @return array{leftMargin: float, topMargin: float, columnWidth: float, contentHeight: float, col2x: float}
+     *
+     * @throws \Throwable
+     */
+    private function addTwoColumnPage(\Com\Tecnick\Pdf\Tcpdf $obj): array
+    {
+        $leftMargin = 15.0;
+        $rightMargin = 15.0;
+        $topMargin = 20.0;
+        $bottomMargin = 20.0;
+        $columnGap = 8.0;
+        $contentWidth = 210.0 - $leftMargin - $rightMargin;
+        $contentHeight = 297.0 - $topMargin - $bottomMargin;
+        $columnWidth = ($contentWidth - $columnGap) / 2.0;
+        $col2x = $leftMargin + $columnWidth + $columnGap;
+
+        $obj->addPage([
+            'margin' => [
+                'PL' => $leftMargin,
+                'PR' => $rightMargin,
+                'CT' => $topMargin,
+                'CB' => $bottomMargin,
+            ],
+            'region' => [
+                [
+                    'RX' => $leftMargin,
+                    'RY' => $topMargin,
+                    'RW' => $columnWidth,
+                    'RH' => $contentHeight,
+                ],
+                [
+                    'RX' => $col2x,
+                    'RY' => $topMargin,
+                    'RW' => $columnWidth,
+                    'RH' => $contentHeight,
+                ],
+            ],
+        ]);
+
+        return [
+            'leftMargin' => $leftMargin,
+            'topMargin' => $topMargin,
+            'columnWidth' => $columnWidth,
+            'contentHeight' => $contentHeight,
+            'col2x' => $col2x,
+        ];
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testParseHTMLTextReanchorsLineCursorAfterRegionBreakToSecondColumn(): void
+    {
+        // Regression: when the fragment itself triggers a region break, the
+        // line-local state captured before the break (line origin X, offset,
+        // available width) must be re-read from the updated cell context, or
+        // the fragment renders at the previous region's X origin.
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFont($obj);
+        $geo = $this->addTwoColumnPage($obj);
+
+        $obj->exposeInitHTMLCellContext($geo['leftMargin'], $geo['topMargin'], $geo['columnWidth'], 0.0);
+        $obj->exposeResetBBoxTrace();
+
+        // A single unbreakable word: no line-split opportunity, so the whole
+        // fragment must move to the next region through the willBreak path.
+        $elm = $this->makeHtmlNode([
+            'value' => 'ColumnBreakProbe',
+            'align' => 'L',
+        ]);
+
+        // Cursor at the bottom of the first column: one text line no longer
+        // fits vertically, forcing the break into the second column region.
+        $tpx = $geo['leftMargin'];
+        $tpy = $geo['topMargin'] + $geo['contentHeight'] - 1.0;
+        $tpw = $geo['columnWidth'];
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLText($elm, $tpx, $tpy, $tpw, $tph);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertCount(1, $trace);
+        assert(isset($trace[0]), "\$trace[0] must be set");
+        $this->assertEqualsWithDelta(
+            $geo['col2x'],
+            $trace[0]['in_x'],
+            0.05,
+            'Fragment must re-anchor to the second column X origin after the region break.',
+        );
+        $this->assertEqualsWithDelta(
+            $geo['topMargin'],
+            $trace[0]['in_y'],
+            0.5,
+            'Fragment must render at the top of the new region.',
+        );
+        $this->assertGreaterThanOrEqual(
+            $geo['col2x'],
+            $tpx,
+            'Cursor must advance from the new line origin, not the stale one.',
+        );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testParseHTMLTextReanchorsAfterRegionBreakWithZeroMaxWidth(): void
+    {
+        // Same re-anchor regression as above, exercising the fallback width
+        // branch: with no cell max width the post-break width is recomputed
+        // from the line-local available width instead of the cell context.
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFont($obj);
+        $geo = $this->addTwoColumnPage($obj);
+
+        $obj->exposeInitHTMLCellContext($geo['leftMargin'], $geo['topMargin'], 0.0, 0.0);
+        $obj->exposeResetBBoxTrace();
+
+        $elm = $this->makeHtmlNode([
+            'value' => 'ColumnBreakProbe',
+            'align' => 'L',
+        ]);
+
+        $tpx = $geo['leftMargin'];
+        $tpy = $geo['topMargin'] + $geo['contentHeight'] - 1.0;
+        $tpw = $geo['columnWidth'];
+        $tph = 0.0;
+
+        $obj->exposeParseHTMLText($elm, $tpx, $tpy, $tpw, $tph);
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertCount(1, $trace);
+        assert(isset($trace[0]), "\$trace[0] must be set");
+        $this->assertEqualsWithDelta(
+            $geo['col2x'],
+            $trace[0]['in_x'],
+            0.05,
+            'Fragment must re-anchor to the second column X origin after the region break.',
+        );
+        $this->assertEqualsWithDelta(
+            $geo['topMargin'],
+            $trace[0]['in_y'],
+            0.5,
+            'Fragment must render at the top of the new region.',
+        );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testAddHTMLCellReanchorsBreakingFragmentIntoSecondColumn(): void
+    {
+        // Regression: in a multi-column layout, the unbreakable fragment that
+        // overflows the first column must render at the second column's X
+        // origin, not at the first column's X over already-rendered content.
+        $obj = $this->getBBoxProbeTestObject();
+        $this->initFont($obj);
+        $geo = $this->addTwoColumnPage($obj);
+        $obj->exposeResetBBoxTrace();
+
+        // Single-word paragraphs have no line-split opportunity: the one that
+        // hits the first column's bottom moves as a whole to the next region.
+        $html = '';
+        for ($i = 0; $i < 45; ++$i) {
+            $html .= '<p>Word' . \str_pad((string) $i, 3, '0', \STR_PAD_LEFT) . '</p>';
+        }
+
+        $obj->addHTMLCell($html, $geo['leftMargin'], $geo['topMargin'], $geo['columnWidth'], 0);
+
+        /** @var \Com\Tecnick\Pdf\Page\Page $page */
+        $page = $this->getObjectProperty($obj, 'page');
+        $this->assertCount(1, $page->getPages(), 'Content must fit in the two column regions of a single page.');
+
+        $trace = $obj->exposeGetBBoxTrace();
+        $this->assertGreaterThan(1, \count($trace));
+
+        // Every fragment placed back at the region top after the first one
+        // belongs to the second column: a fragment at the first column's X at
+        // the region top means the break did not re-anchor the line origin.
+        $foundSecondColumn = false;
+        foreach ($trace as $idx => $row) {
+            if ($row['in_x'] >= ($geo['col2x'] - 0.5)) {
+                $foundSecondColumn = true;
+            }
+
+            if ($idx === 0 || $row['in_y'] > ($geo['topMargin'] + 1.0)) {
+                continue;
+            }
+
+            $this->assertGreaterThanOrEqual(
+                $geo['col2x'] - 0.5,
+                $row['in_x'],
+                'Fragment "' . $row['txt'] . '" rendered at the region top must be in the second column.',
+            );
+        }
+
+        $this->assertTrue($foundSecondColumn, 'Expected content to flow into the second column.');
+    }
+
+    /**
      * @throws \Throwable
      */
     public function testAddHTMLCellAutoFlowSpansMultiplePages(): void
@@ -9258,6 +9460,166 @@ class HTMLTest extends TestUtil
             0.01,
             'Replayed table headers must advance the cursor by their actual rendered height.',
         );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLCellReplaysTableHeadWithSameColumnWidthsOnPxUnitDocument(): void
+    {
+        // Regression for https://github.com/tecnickcom/tc-lib-pdf/issues/224:
+        // injectHTMLTableHeadColWidths serialized the computed column widths
+        // using the document unit name. CSS pixel lengths are parsed with the
+        // 96dpi ratio (1px = 0.75pt) while the 'px' document unit maps one
+        // user unit to one point, so replayed headers on continuation pages
+        // were rendered at 75% of the table width.
+        $obj = new \Com\Tecnick\Pdf\Tcpdf('px');
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<table cellpadding="3" cellspacing="0">'
+            . '<thead><tr style="background-color:#cccccc"><th>H</th><th>HH</th></tr></thead>'
+            . '<tr style="page-break-before:always"><td>A</td><td>B</td></tr></table>',
+            0,
+            0,
+            100,
+            0,
+        );
+
+        $this->assertGreaterThanOrEqual(2, \substr_count($out, '(H)'));
+
+        // The only rectangles in the output are the header background fills:
+        // two columns on the original page and two on the continuation page.
+        // The replayed header must keep the exact column geometry computed
+        // for the original table (100 user units = 100pt split in half).
+        $matches = [];
+        \preg_match_all('/[0-9.+-]+ [0-9.+-]+ ([0-9.+-]+) [0-9.+-]+ re/', $out, $matches);
+        $rectwidths = $matches[1] ?? [];
+        $this->assertIsArray($rectwidths);
+        $widths = [];
+        foreach ($rectwidths as $rectwidth) {
+            $widths[] = \is_numeric($rectwidth) ? \round((float) $rectwidth, 4) : -1.0;
+        }
+
+        $this->assertSame([50.0, 50.0, 50.0, 50.0], $widths);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testMeasureHTMLCellDivExplicitHeightReservesSpaceWithoutBackground(): void
+    {
+        // Regression for https://github.com/tecnickcom/tc-lib-pdf/issues/225:
+        // an explicit CSS height on a block element was honored only when the
+        // block also declared its own background or border.
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $plain = $obj->exposeMeasureHTMLCellRenderedHeight('<div>x</div>', 0.0, 0.0, 100.0, 0.0);
+        $fixed = $obj->exposeMeasureHTMLCellRenderedHeight('<div style="height:50mm">x</div>', 0.0, 0.0, 100.0, 0.0);
+
+        $this->assertGreaterThan(0.0, $plain);
+        $this->assertGreaterThan($plain, $fixed);
+        $this->assertGreaterThanOrEqual(
+            50.0 - 0.001,
+            $fixed,
+            'A block with an explicit CSS height but no background/border must reserve at least that height.',
+        );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLCellPaintsDivBackgroundBehindTextInsideTableCell(): void
+    {
+        // Regression for https://github.com/tecnickcom/tc-lib-pdf/issues/225:
+        // the background of a styled DIV inside a table cell was emitted after
+        // the already-captured cell text, covering it.
+        $obj = $this->getTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<table cellpadding="3" cellspacing="0"><tr>'
+            . '<td><div style="color:blue; background-color:yellow; height:30mm;">Z</div></td>'
+            . '</tr></table>',
+            0,
+            0,
+            100,
+            0,
+        );
+
+        $fillpos = \strpos($out, '1.000000 1.000000 0.000000 rg');
+        $textpos = \strpos($out, '(Z)');
+        $this->assertNotFalse($fillpos, 'The yellow DIV background fill must be present in the output.');
+        $this->assertNotFalse($textpos, 'The DIV text content must be present in the output.');
+        $this->assertLessThan(
+            $textpos,
+            $fillpos,
+            'The DIV background fill must be painted before (behind) its text content.',
+        );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testEstimateHTMLTableRowHeightAccountsForNestedDivExplicitHeight(): void
+    {
+        // Regression for https://github.com/tecnickcom/tc-lib-pdf/issues/225:
+        // row-height estimation ignored the explicit CSS height of block
+        // elements nested in the cells, so rows containing fixed-height DIVs
+        // started near the page bottom and were split across pages.
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $dom = $obj->exposeGetHTMLDOM('<table><tr><td><div style="height:60mm">x</div></td></tr></table>');
+        $trkey = -1;
+        foreach ($dom as $key => $elm) {
+            if (!$elm['tag'] || !$elm['opening'] || $elm['value'] !== 'tr') {
+                continue;
+            }
+
+            $trkey = $key;
+            break;
+        }
+
+        $this->assertGreaterThan(0, $trkey);
+        $rowheight = $obj->exposeEstimateHTMLTableRowHeightWithDom($dom, $trkey);
+        $this->assertGreaterThanOrEqual(
+            60.0 - 0.001,
+            $rowheight,
+            'Row height estimation must account for the explicit CSS height of nested block elements.',
+        );
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    public function testGetHTMLDOMDoesNotLeakEmptyPseudoClassStylesToSiblings(): void
+    {
+        // The streaming DOM pass evaluates :empty before children are parsed,
+        // so every <p> initially matches; the final-tree recompute pass must
+        // clear the stale style-derived height from the non-empty siblings.
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $dom = $obj->exposeGetHTMLDOM(
+            '<style>p:empty { height: 25mm; background-color: #ffee00; }</style>'
+            . '<div><p></p><p class="plain">plain one</p><p class="plain">plain two</p></div>',
+        );
+
+        $heights = [];
+        foreach ($dom as $elm) {
+            if (!$elm['tag'] || !$elm['opening'] || $elm['value'] !== 'p') {
+                continue;
+            }
+
+            $heights[] = $elm['height'];
+        }
+
+        $this->assertCount(3, $heights);
+        $this->assertEqualsWithDelta(25.0, $heights[0] ?? 0.0, 0.01, 'The empty <p> must keep its :empty height.');
+        $this->assertSame(0.0, $heights[1] ?? -1.0, 'Non-empty siblings must not inherit the :empty height.');
+        $this->assertSame(0.0, $heights[2] ?? -1.0, 'Non-empty siblings must not inherit the :empty height.');
     }
 
     /**
@@ -17568,6 +17930,57 @@ class HTMLTest extends TestUtil
         $obj->exposeUpdateHTMLLineAdvance(8.0);
         $hrc = $obj->exposeGetHTMLRenderContext();
         $this->assertSame(8.0, $hrc['cellctx']['lineadvance']);
+    }
+
+    /**
+     * Regression test: font family names ending in style-suffix letters
+     * ('b', 'i', 'u', 'd', 'o') must not be truncated when deriving the
+     * HTML base font name. For example "dejavusanscondensed" was returned
+     * as "dejavusanscondense" because the trailing 'd' was treated as the
+     * strikeout style suffix, even though it is part of the family name.
+     *
+     * @throws \Throwable
+     */
+    public function testHtmlBaseFontNamePreservesFamilyNamesEndingInStyleLetters(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $fontfile = (string) \realpath(__DIR__
+        . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/dejavu/dejavusanscondensed.json');
+        $obj->font->insert($obj->pon, 'dejavusanscondensed', '', 12, null, null, $fontfile);
+
+        $this->assertSame('dejavusanscondensed', $obj->exposeGetHTMLBaseFontName());
+
+        // The uppercase 'B'/'I' font-key style suffix must still be stripped.
+        $fontfileb = (string) \realpath(__DIR__
+        . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/dejavu/dejavusanscondensedb.json');
+        $obj->font->insert($obj->pon, 'dejavusanscondensed', 'B', 12, null, null, $fontfileb);
+
+        $this->assertSame('dejavusanscondensedB', $obj->font->getCurrentFontKey());
+        $this->assertSame('dejavusanscondensed', $obj->exposeGetHTMLBaseFontName());
+
+        // getHTMLFontMetric() must not truncate the family name either,
+        // even when a strikeout (D) style is requested.
+        $obj->exposeInitHTMLCellContext(0.0, 0.0, 80.0, 0.0);
+        $dom = [
+            $this->makeHtmlNode([
+                'tag' => false,
+                'opening' => false,
+                'value' => 'Alpha',
+                'fontname' => 'dejavusanscondensed',
+                'fontstyle' => 'D',
+                'fontsize' => 12.0,
+            ]),
+        ];
+        $metric = $obj->exposeGetHTMLFontMetricWithDom($dom, 0);
+        $this->assertSame('dejavusanscondensed', $metric['key'] ?? null);
+
+        // Rendering HTML captures and restores the caller font state:
+        // captureHTMLCallerFontState() must not truncate the family name.
+        $obj->font->insert($obj->pon, 'dejavusanscondensed', '', 12);
+        $obj->getHTMLCell('<p>Plain <b>bold</b> <s>strike</s></p>', 10.0, 10.0, 100.0, 0.0);
+        $this->assertSame('dejavusanscondensed', $obj->font->getCurrentFontKey());
     }
 
     /**
