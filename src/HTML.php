@@ -949,7 +949,9 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
             $font = $fontStack->getCurrentFont();
             $fontkey = $font['key'] ?? '';
             if (isset($font['stretching'])) {
-                $fontstretch = (float) $font['stretching'];
+                // The font stack stores stretching as a ratio (1.0 = 100%), but every
+                // parsed CSS font-stretch value is a percentage; normalise to percent.
+                $fontstretch = (float) $font['stretching'] * 100.0;
             }
             if (isset($font['size'])) {
                 $fontsize = (float) $font['size'];
@@ -8729,7 +8731,14 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
             }
         }
 
-        $metric = $this->font->insert($this->pon, $fontstate['family'], $fontstyle, $fontsize);
+        $metric = $this->font->insert(
+            $this->pon,
+            $fontstate['family'],
+            $fontstyle,
+            $fontsize,
+            $fontstate['spacing'],
+            $fontstate['stretching'],
+        );
         if ($metric['out'] !== '') {
             $out .= $metric['out'];
         }
@@ -8767,11 +8776,20 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
             && \is_string($markerState['font']['style'])
             && \is_numeric($markerState['font']['size'])
         ) {
+            $markerSpacing = isset($markerState['font']['spacing']) && \is_numeric($markerState['font']['spacing'])
+                ? (float) $markerState['font']['spacing']
+                : 0.0;
+            $markerStretching = isset($markerState['font']['stretching'])
+            && \is_numeric($markerState['font']['stretching'])
+                ? (float) $markerState['font']['stretching']
+                : 1.0;
             $metric = $this->font->insert(
                 $this->pon,
                 $markerState['font']['family'],
                 $markerState['font']['style'],
                 (float) $markerState['font']['size'],
+                $markerSpacing,
+                $markerStretching,
             );
             if ($metric['out'] !== '') {
                 $out = $metric['out'] . $out;
@@ -8824,7 +8842,7 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
     /**
      * Capture the active font state so HTML rendering can restore it afterwards.
      *
-     * @return array{family: string, style: string, size: float}
+     * @return array{family: string, style: string, size: float, spacing: float, stretching: float}
      *
      * @throws \Com\Tecnick\Pdf\Font\Exception
      */
@@ -8859,19 +8877,28 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
             'family' => $family,
             'style' => $style,
             'size' => $size,
+            'spacing' => $curfont['spacing'],
+            'stretching' => $curfont['stretching'],
         ];
     }
 
     /**
      * Restore the font state captured before HTML rendering started.
      *
-     * @param array{family: string, style: string, size: float} $fontstate Captured font state.
+     * @param array{family: string, style: string, size: float, spacing: float, stretching: float} $fontstate Captured font state.
      *
      * @throws \Com\Tecnick\Pdf\Font\Exception
      */
     protected function restoreHTMLCallerFontState(array $fontstate): string
     {
-        $font = $this->font->insert($this->pon, $fontstate['family'], $fontstate['style'], $fontstate['size']);
+        $font = $this->font->insert(
+            $this->pon,
+            $fontstate['family'],
+            $fontstate['style'],
+            $fontstate['size'],
+            $fontstate['spacing'],
+            $fontstate['stretching'],
+        );
 
         return $font['out'];
     }
@@ -8915,25 +8942,49 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
 
         $fontsize = $this->resolveHTMLFontSizeAdjust($elm, $fontname, $fontstyle, $fontsize);
 
-        $cachekey = $fontname . '|' . $fontstyle . '|' . (string) $fontsize;
+        // CSS font-stretch is authored as a percentage but the font stack expects a
+        // ratio (1.0 = 100%); CSS letter-spacing is already in points. A non-positive
+        // stretch is treated as the neutral 100%.
+        $stretchPercent = $elm['font-stretch'];
+        $stretching = $stretchPercent > 0.0 ? $stretchPercent / 100.0 : 1.0;
+        $spacing = $elm['letter-spacing'];
+
+        $cachekey =
+            $fontname
+            . '|'
+            . $fontstyle
+            . '|'
+            . (string) $fontsize
+            . '|'
+            . (string) $stretching
+            . '|'
+            . (string) $spacing;
         if (isset($hrc['fontcache'][$cachekey])) {
-            // Re-insert when cached font differs from the active one.
-            // Font key alone is not enough because different font sizes may share the same key.
+            // Re-insert when the active font differs from the cached one. The font key
+            // and size alone are not enough because distinct stretching/spacing values
+            // share the same key, so compare those too.
             $curfont = $this->font->getCurrentFont();
             $cursize = $curfont['size'];
+            $curstretch = $curfont['stretching'];
+            $curspacing = $curfont['spacing'];
             $curkey = $this->font->getCurrentFontKey();
             $cachefontkey = '';
             if (isset($hrc['fontcache'][$cachekey]['key']) && \is_string($hrc['fontcache'][$cachekey]['key'])) {
                 $cachefontkey = $hrc['fontcache'][$cachekey]['key'];
             }
-            if ($curkey !== $cachefontkey || \abs($cursize - $fontsize) > 0.0001) {
-                $this->font->insert($this->pon, $fontname, $fontstyle, $fontsize);
+            if (
+                $curkey !== $cachefontkey
+                || \abs($cursize - $fontsize) > 0.0001
+                || \abs($curstretch - $stretching) > 0.0001
+                || \abs($curspacing - $spacing) > 0.0001
+            ) {
+                $this->font->insert($this->pon, $fontname, $fontstyle, $fontsize, $spacing, $stretching);
             }
 
             return $hrc['fontcache'][$cachekey];
         }
 
-        $metric = $this->font->insert($this->pon, $fontname, $fontstyle, $fontsize);
+        $metric = $this->font->insert($this->pon, $fontname, $fontstyle, $fontsize, $spacing, $stretching);
         $hrc['fontcache'][$cachekey] = $metric;
 
         return $metric;
@@ -9880,6 +9931,58 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
         }
 
         return (int) ($lines[0]['spaces'] ?? 0);
+    }
+
+    /**
+     * Split a justified inline text fragment at its first visual line break.
+     *
+     * Returns [head, tail] where head is the portion that fits on the current
+     * line (within $maxwidth) and tail is the remainder, or null when the text
+     * fits on a single line or cannot be split safely. Used so that each
+     * wrapped visual line of a justified paragraph computes its own word
+     * spacing, instead of a single run baking the first line's spacing into
+     * the lines it overflows onto.
+     *
+     * @return array{0: string, 1: string}|null
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function splitHTMLJustifyFirstLine(string $text, string $forcedir, float $maxwidth): ?array
+    {
+        if (\trim($text) === '' || $maxwidth <= 0.0) {
+            return null;
+        }
+
+        $ordarr = [];
+        $dim = $this->getHTMLDefaultTextDims();
+        $this->prepareHTMLText($text, $ordarr, $dim, $forcedir);
+        $numord = \count($ordarr);
+        if ($numord === 0) {
+            return null;
+        }
+
+        $lines = $this->splitLines($ordarr, $dim, $this->toPoints($maxwidth));
+        if (\count($lines) < 2) {
+            // Fits on a single line: nothing to split.
+            return null;
+        }
+
+        $headchars = (int) ($lines[0]['chars'] ?? 0);
+        $tailpos = (int) ($lines[1]['pos'] ?? 0);
+        if ($headchars <= 0 || $tailpos <= 0 || $tailpos >= $numord) {
+            return null;
+        }
+
+        $headord = \array_slice($ordarr, 0, $headchars);
+        $tailord = \array_slice($ordarr, $tailpos);
+        $head = \implode('', $this->uniconv->ordArrToChrArr($this->removeOrdArrSoftHyphens($headord)));
+        $tail = \implode('', $this->uniconv->ordArrToChrArr($tailord));
+        if (\trim($head) === '' || \trim($tail) === '') {
+            return null;
+        }
+
+        return [$head, $tail];
     }
 
     /**
@@ -14792,6 +14895,11 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
 
             if ($customJustify) {
                 if ($lineOffset <= self::WIDTH_TOLERANCE) {
+                    // Measure the greedy (zero word-spacing) fill of the line, then
+                    // distribute the leftover over its spaces. The break point is taken
+                    // at zero spacing on purpose: word spacing is derived to fill exactly
+                    // that content to $availableWidth, so applying it never pushes a word
+                    // off the line.
                     $lineMetrics = $this->measureHTMLInlineLineMetrics($hrc, $currentkey, $availableWidth);
                     if (
                         $lineMetrics['wrapped']
@@ -14799,20 +14907,6 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
                         && $lineMetrics['width'] < ($availableWidth - self::WIDTH_TOLERANCE)
                     ) {
                         $lineWordSpacing = ($availableWidth - $lineMetrics['width']) / (int) $lineMetrics['spaces'];
-
-                        $lineMetrics = $this->measureHTMLInlineLineMetrics(
-                            $hrc,
-                            $currentkey,
-                            $availableWidth,
-                            $lineWordSpacing,
-                        );
-                        if (
-                            $lineMetrics['wrapped']
-                            && (int) $lineMetrics['spaces'] > 0
-                            && $lineMetrics['width'] < ($availableWidth - self::WIDTH_TOLERANCE)
-                        ) {
-                            $lineWordSpacing = ($availableWidth - $lineMetrics['width']) / (int) $lineMetrics['spaces'];
-                        }
                     }
 
                     $hrc['cellctx']['linewordspacing'] = $lineWordSpacing;
@@ -14821,6 +14915,51 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
                 }
             } else {
                 $hrc['cellctx']['linewordspacing'] = 0.0;
+            }
+        }
+
+        // Justified inline runs that overflow the current line must not bake the
+        // first line's word spacing into the lines they wrap onto: a single
+        // getTextCell render shares one spacing across all of its visual lines,
+        // so a continuation line (and any inline siblings sharing it) is left
+        // under-justified. Split the run at the first visual line break and
+        // render each part on its own line, where the word spacing is recomputed
+        // for that line's full content (this fragment's tail plus following
+        // inline). Only plain, wrappable text is split; the recursion terminates
+        // because head and tail are both strictly shorter than the input.
+        if (
+            $halign === 'J'
+            && $customJustify
+            && \trim($text) !== ''
+            && $fragmentWidth > ($remainingWidth + self::WIDTH_TOLERANCE)
+            && $this->getHTMLWhiteSpaceMode($hrc, $key) !== 'nowrap'
+            && !$this->isHTMLPreLikeWhiteSpaceMode($hrc, $key)
+            && $this->hasHTMLTextBreakOpportunity($hrc, $key, $text)
+        ) {
+            $justifySplit = $this->splitHTMLJustifyFirstLine($text, $forcedir, $remainingWidth);
+            if ($justifySplit !== null) {
+                $origElm = $hrc['dom'][$key] ?? null;
+                if (!\is_array($origElm)) {
+                    return '';
+                }
+
+                $headElm = $origElm;
+                $headElm['value'] = $justifySplit[0];
+                $hrc['dom'][$key] = $headElm;
+                $headOut = $this->parseHTMLText($hrc, $key, $tpx, $tpy, $tpw, $tph, $appendFragment);
+
+                $linebottom = $hrc['cellctx']['linebottom'] > 0 ? $hrc['cellctx']['linebottom'] : 0.0;
+                $tpy = \max($tpy + $this->getCurrentHTMLLineAdvance($hrc, $key), $linebottom);
+                $this->resetHTMLLineCursor($hrc, $tpx, $tpw);
+
+                $tailElm = $origElm;
+                $tailElm['value'] = $justifySplit[1];
+                $hrc['dom'][$key] = $tailElm;
+                $tailOut = $this->parseHTMLText($hrc, $key, $tpx, $tpy, $tpw, $tph, $appendFragment);
+
+                $hrc['dom'][$key] = $origElm;
+
+                return $breakoutPrefix . $headOut . $tailOut;
             }
         }
 
@@ -15181,6 +15320,22 @@ abstract class HTML extends \Com\Tecnick\Pdf\JavaScript
             if ($hasBlockBgAncestor) {
                 $bgx = $lineOriginX;
                 $bgw = $availableWidth;
+            }
+
+            // A custom-justified inline run is rendered left-aligned with a Tw
+            // word spacing that stretches it to fill the line, but bbox['w'] only
+            // records the natural (unspaced) string width. Extend the fill by the
+            // same amount the cursor advance adds below, so the background covers
+            // the trailing glyphs of the justified line instead of stopping short.
+            if (!$hasBlockBgAncestor && $effectiveWordSpacing > 0.0) {
+                $bgFragmentSpaces = $this->getHTMLTextFirstLineSpaces(
+                    $text,
+                    $forcedir,
+                    \max(0.0, $renderWidth - $renderOffset),
+                );
+                if ($bgFragmentSpaces > 0) {
+                    $bgw += $effectiveWordSpacing * $bgFragmentSpaces;
+                }
             }
 
             if ($wrapped && !$hasBlockBgAncestor) {
