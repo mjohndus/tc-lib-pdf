@@ -418,10 +418,10 @@ class Tcpdf extends \Com\Tecnick\Pdf\Output
         array $style = [],
     ): string {
         $model = $this->barcode->getBarcodeObj($type, $code, $width, $height, 'black', $padding);
-        $bars = $model->getBarsArrayXYWH();
+        list($bars, $sbars) = $model->getBarsArrayXYWH();
         $out = '';
         $out .= $this->graph->getStartTransform();
-        $out .= $this->graph->getStyleCmd($style);
+        $out .= $this->graph->getStyleCmd($style[0]);
         foreach ($bars as $bar) {
             /** @var array{0: numeric, 1: numeric, 2: numeric, 3: numeric} $bar */
             $x = (float) $bar[0];
@@ -429,6 +429,18 @@ class Tcpdf extends \Com\Tecnick\Pdf\Output
             $w = (float) $bar[2];
             $h = (float) $bar[3];
             $out .= $this->graph->getBasicRect($posx + $x, $posy + $y, $w, $h, 'f');
+        }
+
+        if (!empty($style[1])) {
+            $out .= $this->graph->getStyleCmd($style[1]);
+            foreach ($sbars as $bar) {
+                /** @var array{0: numeric, 1: numeric, 2: numeric, 3: numeric} $bar */
+                $x = (float) $bar[0];
+                $y = (float) $bar[1];
+                $w = (float) $bar[2];
+                $h = (float) $bar[3];
+                $out .= $this->graph->getBasicRect($posx + $x, $posy + $y, $w, $h, 'f');
+            }
         }
 
         return $out . $this->graph->getStopTransform();
