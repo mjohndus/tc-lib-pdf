@@ -582,25 +582,34 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
             //.' /Extensions <<>>'
             . ' /Pages '
             . $this->objid['pages']
-            . ' 0 R'
-            //.' /PageLabels ' //...
-            . ' /Names <<';
+            . ' 0 R';
+        //.' /PageLabels ' //...
+
+        $names = '';
         if ($this->pdfa === 0 && !$this->pdfx && $this->pdfuaMode === '' && $this->jstree !== '') {
-            $out .= ' /JavaScript ' . $this->jstree;
+            $names .= ' /JavaScript ' . $this->jstree;
         }
 
         if ($this->embeddedfiles !== []) {
             $afnames = [];
             $afobjs = [];
             foreach ($this->embeddedfiles as $efname => $efdata) {
-                $afnames[] = $this->getOutTextString($efname, $oid) . ' ' . $efdata['f'] . ' 0 R';
+                // The EmbeddedFiles name-tree key must be a plain (PDFDocEncoded)
+                // byte string matching the Filespec /F, not UTF-16BE, otherwise
+                // readers cannot resolve the embedded file by name.
+                $afnames[] = $this->encrypt->escapeDataString($efname, $oid) . ' ' . $efdata['f'] . ' 0 R';
                 $afobjs[] = $efdata['f'] . ' 0 R';
             }
+            $names .= ' /EmbeddedFiles << /Names [ ' . \implode(' ', $afnames) . ' ] >>';
+            // The /AF (Associated Files) array is an entry of the document Catalog
+            // dictionary itself, not of the /Names tree (ISO 32000-2, PDF/A-3).
             $out .= ' /AF [ ' . \implode(' ', $afobjs) . ' ]';
-            $out .= ' /EmbeddedFiles << /Names [ ' . \implode(' ', $afnames) . ' ] >>';
         }
 
-        $out .= ' >>';
+        // Only emit the /Names dictionary when it actually has content.
+        if ($names !== '') {
+            $out .= ' /Names <<' . $names . ' >>';
+        }
 
         if ($this->objid['dests'] !== 0) {
             $out .= ' /Dests ' . $this->objid['dests'] . ' 0 R';
@@ -1388,14 +1397,18 @@ abstract class Output extends \Com\Tecnick\Pdf\MetaInfo
                 . ' 0 obj'
                 . "\n"
                 . '<<'
+                // /F is the PDFDocEncoded (ASCII) file name; it must NOT be
+                // UTF-16BE encoded or readers (and ZUGFeRD/Factur-X validators)
+                // fail to match the embedded file. /UF carries the Unicode name
+                // as UTF-16BE WITH the mandatory byte order mark.
                 . ' /Type /Filespec /F '
-                . $this->getOutTextString($name, $oid)
+                . $this->encrypt->escapeDataString($name, $oid)
                 . ' /UF '
-                . $this->getOutTextString($name, $oid)
+                . $this->getOutTextString($name, $oid, true)
                 . ' /AFRelationship /'
                 . $data['afRelationship']
                 . ' /Desc '
-                . $this->getOutTextString($data['description'], $data['f'])
+                . $this->getOutTextString($data['description'], $data['f'], true)
                 . ' /EF <</F '
                 . $data['n']
                 . ' 0 R>>'
