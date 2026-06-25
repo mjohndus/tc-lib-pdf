@@ -28,6 +28,7 @@
         "php": ">=8.2",
         "ext-date": "*",
         "ext-pcre": "*",
+        "tecnickcom/tc-lib-barcode": "^2.10",
         "tecnickcom/tc-lib-color": "^2.11",
         "tecnickcom/tc-lib-pdf-image": "^3.10",
         "tecnickcom/tc-lib-pdf-font": "^3.7",
