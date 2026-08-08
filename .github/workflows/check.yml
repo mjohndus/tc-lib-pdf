@@ -10,11 +10,11 @@ concurrency:
 on:
   push:
     branches:
-      - 'mjohndus'
+      - 'main'
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
-      - mjohndus
+      - main
 
 jobs:
   test-php:
