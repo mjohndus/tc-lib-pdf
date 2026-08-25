@@ -232,14 +232,10 @@ class TextTest extends TestUtil
     }
 
     /**
-     * Regression test:
-     *
      * A custom defaultPageContent() that draws vector graphics through the graph
-     * component (here a line) must render correctly on the first page. The graph
-     * flips the Y axis against the page height; previously that height was still
-     * zero when the first page context was generated (it was only set after
-     * setPageContext()), so the first page emitted negative, off-page coordinates
-     * while every subsequent page reused the prior page height and rendered fine.
+     * component (here a line) renders on the first page with in-page coordinates.
+     * The graph flips the Y axis against the page height, so that height must be
+     * known when the first page context is generated.
      *
      * @throws \Throwable
      */
@@ -406,12 +402,10 @@ class TextTest extends TestUtil
     }
 
     /**
-     * Regression: a blank line inside a multi-line text cell must occupy a full
-     * line of vertical space. An empty line renders no glyphs, so getLastBBox()
-     * used to return the stale box of the previously rendered line and the blank
-     * line collapsed (the following line jumped up to overlap it). outTextLines()
-     * now synthesises a zero-width box at the blank line's own position so the
-     * text bounding box grows by one line height per blank line.
+     * A blank line inside a multi-line text cell occupies a full line of vertical
+     * space. An empty line renders no glyphs, so outTextLines() synthesises a
+     * zero-width box at the blank line's own position and the text bounding box
+     * grows by one line height per blank line.
      *
      * @throws \Throwable
      */
@@ -432,7 +426,7 @@ class TextTest extends TestUtil
         $this->assertGreaterThan(0.0, $lineHeight);
 
         // A blank middle line counts as a full line: "A\n\nB" spans three lines,
-        // exactly like "A\nC\nB". Before the fix it collapsed to two lines.
+        // exactly like "A\nC\nB".
         $this->assertEqualsWithDelta($threeLines, $blankMiddle, 1.0e-6);
         $this->assertGreaterThan($twoLines, $blankMiddle);
 
@@ -1819,6 +1813,13 @@ class TextTest extends TestUtil
         $this->assertTrue($baseRtl);
         [, , , $baseLtr] = $obj->exposePrepareTextWithDir('abc', '');
         $this->assertFalse($baseLtr);
+
+        // A left-to-right run in an RTL paragraph is not reordered, so it stays logical.
+        [, , , $baseLatin] = $obj->exposePrepareTextWithDir('abc def', 'R');
+        $this->assertFalse($baseLatin);
+        // A run of neutrals is reordered, so it is visual.
+        [, , , $baseNeutral] = $obj->exposePrepareTextWithDir('123 456', 'R');
+        $this->assertTrue($baseNeutral);
     }
 
     /**
@@ -1948,6 +1949,47 @@ class TextTest extends TestUtil
         $this->assertNotEmpty($actualTokens);
         $this->assertSame($expectedRtl, $actualTokens);
         $this->assertNotSame($expectedVisual, $actualTokens);
+    }
+
+    /**
+     * A left-to-right paragraph rendered in RTL mode is not Bidi reordered, so its
+     * lines must be broken forward: the first words go on the top line.
+     *
+     * @throws \Throwable
+     */
+    public function testGetTextCellStacksWrappedLatinRtlParagraphInReadingOrder(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initUnicodeFont($obj);
+        $this->setObjectProperty($obj, 'isunicode', true);
+        $obj->setRTL(true);
+        $obj->addPage();
+
+        $txt = 'one two three four five six seven eight nine ten';
+        $cellWidthMm = 30.0;
+        [, $ordarr, $dim] = $obj->exposePrepareText($txt, 'R');
+        $renderWidthPts = $obj->toPoints($cellWidthMm);
+
+        $forwardLines = $obj->exposeSplitLines($ordarr, $dim, $renderWidthPts, 0, false);
+        $reversedLines = $obj->exposeSplitLines($ordarr, $dim, $renderWidthPts, 0, true);
+        $this->assertGreaterThan(1, \count($forwardLines));
+
+        $glyphTokens = static function (string $content): array {
+            $matches = [];
+            \preg_match_all('/(\([^)]*\)|<[0-9A-Fa-f]*>|\[[^\]]*\])\s*T[jJ]/s', $content, $matches);
+            return $matches[1] ?? [];
+        };
+
+        $out = $obj->getTextCell(txt: $txt, posx: 5, posy: 20, width: $cellWidthMm, drawcell: false, forcedir: 'R');
+        $actualTokens = $glyphTokens($out);
+
+        $width = $obj->toUnit($renderWidthPts);
+        $expectedForward = $glyphTokens($obj->exposeOutTextLines($ordarr, $forwardLines, 5, 20, $width, 0, 5, 0));
+        $expectedReversed = $glyphTokens($obj->exposeOutTextLines($ordarr, $reversedLines, 5, 20, $width, 0, 5, 0));
+
+        $this->assertNotEmpty($actualTokens);
+        $this->assertSame($expectedForward, $actualTokens);
+        $this->assertNotSame($expectedReversed, $actualTokens);
     }
 
     /** @throws \Throwable */
@@ -3291,9 +3333,9 @@ class TextTest extends TestUtil
 
     /**
      * A caller-supplied $linespace that exactly cancels the font height makes
-     * the per-region line pitch zero. addTextCell must not divide by it
-     * (regression: DivisionByZeroError). Using point units keeps the unit
-     * conversion an identity so $linespace can cancel the font height exactly.
+     * the per-region line pitch zero. addTextCell must not divide by it. Using
+     * point units keeps the unit conversion an identity so $linespace can cancel
+     * the font height exactly.
      *
      * @throws \Throwable
      */

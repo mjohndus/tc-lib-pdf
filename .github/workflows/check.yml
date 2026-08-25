@@ -35,7 +35,7 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           coverage: pcov
-          extensions: bcmath, curl, date, gd, hash, imagick, json, mbstring, openssl, pcre, zlib
+          extensions: bcmath, curl, date, gd, hash, imagick, intl, json, mbstring, openssl, pcre, zlib
           ini-values: display_errors=on, error_reporting=-1, zend.assertions=1
       - name: List php modules
         run: php -m
@@ -78,7 +78,7 @@ jobs:
       #    cat target/report/renderability-trend.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload CSS renderability reports
         if: matrix.php-version == '8.4'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: css-renderability-reports-${{ github.run_id }}
           path: |
