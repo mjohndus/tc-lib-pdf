@@ -5,24 +5,24 @@
     "homepage": "https://tcpdf.org",
     "license": "LGPL-3.0-or-later",
     "keywords": [
-        "tc-lib-pdf",
-        "TCPDF",
-        "PDF",
-        "PDFD32000-2008",
-        "document"
+      "tc-lib-pdf",
+      "TCPDF",
+      "PDF",
+      "PDFD32000-2008",
+      "document"
     ],
     "authors": [
-        {
-            "name": "Nicola Asuni",
-            "email": "info@tecnick.com",
-            "role": "lead"
+      {
+        "name": "Nicola Asuni",
+        "email": "info@tecnick.com",
+        "role": "lead"
         }
     ],
     "funding": [
-        {
-            "type": "github",
-            "url": "https://github.com/sponsors/tecnickcom"
-        }
+      {
+        "type": "github",
+        "url": "https://github.com/sponsors/tecnickcom"
+      }
     ],
     "require": {
         "php": "^8.2",
