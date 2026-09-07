@@ -16,6 +16,8 @@
 
 namespace Test;
 
+use Com\Tecnick\Unicode\Data\Constant as UnicodeConstant;
+
 /**
  * @phpstan-import-type TTextDims from \Com\Tecnick\Pdf\Font\Stack
  * @phpstan-import-type TextLinePos from \Com\Tecnick\Pdf\Text
@@ -66,6 +68,18 @@ class TextTest extends TestUtil
     protected function getInternalTestObject(): TestableText
     {
         return new TestableText();
+    }
+
+    /** @throws \Throwable */
+    private function initUnifontFont(\Com\Tecnick\Pdf\Tcpdf $obj): void
+    {
+        /** @var \Com\Tecnick\Pdf\Font\Stack $font */
+        $font = $this->getObjectProperty($obj, 'font');
+        /** @var int $pon */
+        $pon = $this->getObjectProperty($obj, 'pon');
+        $fontfile = (string) \realpath(__DIR__
+        . '/../vendor/tecnickcom/tc-lib-pdf-font/target/fonts/unifont/unifont.json');
+        $font->insert($pon, 'unifont', '', 10, null, null, $fontfile);
     }
 
     /** @throws \Throwable */
@@ -1654,7 +1668,7 @@ class TextTest extends TestUtil
         $obj = $this->getInternalTestObject();
 
         $this->assertSame("A B\u{00A0}C", $obj->exposeCleanupText("A\rB\u{00A0}C\u{00AD}"));
-        $this->assertSame([65, 173], \array_values($obj->exposeRemoveOrdArrSoftHyphens([65, 173, 8203, 173])));
+        $this->assertSame([65, 45], \array_values($obj->exposeRemoveOrdArrSoftHyphens([65, 173, 8203, 173])));
         $this->assertSame([36, 8203, 65], $obj->exposeAddOrdArrBreakPoints([36, 65]));
         $this->assertSame([65, 66], $obj->exposeReplaceUnicodeChars([65, 66]));
         $this->assertSame('100%% ready', $obj->exposeEscapePerc('100% ready'));
@@ -2676,7 +2690,7 @@ class TextTest extends TestUtil
     }
 
     /** @throws \Throwable */
-    public function testRemoveOrdArrSoftHyphensKeepsTrailingSoftHyphenOnlyWhenPresent(): void
+    public function testRemoveOrdArrSoftHyphensConvertsTrailingSoftHyphenOnlyWhenPresent(): void
     {
         $obj = $this->getInternalTestObject();
 
@@ -2684,7 +2698,46 @@ class TextTest extends TestUtil
         $withTrailing = $obj->exposeRemoveOrdArrSoftHyphens([65, 8203, 173]);
 
         $this->assertSame([65, 66], $withoutTrailing);
-        $this->assertSame([65, 173], $withTrailing);
+        $this->assertSame([65, 45], $withTrailing);
+    }
+
+    /**
+     * A line broken on a hyphenation point must render the HYPHEN charged by splitLines(),
+     * not the SOFT HYPHEN, whose glyph and advance width are font dependent.
+     *
+     * @throws \Throwable
+     */
+    public function testHyphenatedLineBreakRendersHyphenWithTheMeasuredWidth(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initUnifontFont($obj);
+
+        // unifont draws U+00AD as a "SHY" box of 1000 units against the 500 of U+002D.
+        $this->assertNotSame(
+            $obj->exposeGetOrdArrDims([UnicodeConstant::HYPHEN])['totwidth'],
+            $obj->exposeGetOrdArrDims([UnicodeConstant::SOFT_HYPHEN])['totwidth'],
+        );
+
+        $patterns = [];
+        foreach (\range('a', 'z') as $letter) {
+            $patterns[$letter] = $letter . '1';
+        }
+        $obj->setTexHyphenPatterns($patterns);
+
+        // A single word forces the wrap to fall on a hyphenation point.
+        [, $ordarr, $dim] = $obj->exposePrepareText('setTexHyphenPatterns');
+        $lines = $obj->exposeSplitLines($ordarr, $dim, 60);
+        $this->assertGreaterThan(1, \count($lines));
+
+        $first = $lines[0] ?? null;
+        $this->assertIsArray($first);
+
+        $rendered = $obj->exposeRemoveOrdArrSoftHyphens(\array_slice($ordarr, $first['pos'], $first['chars']));
+        $this->assertSame([UnicodeConstant::HYPHEN], \array_slice($rendered, -1));
+        $this->assertNotContains(UnicodeConstant::SOFT_HYPHEN, $rendered);
+
+        // The rendered line must advance by exactly the width splitLines() reserved for it.
+        $this->assertEqualsWithDelta($first['totwidth'], $obj->exposeGetOrdArrDims($rendered)['totwidth'], 0.0001);
     }
 
     /** @throws \Throwable */
@@ -2697,7 +2750,7 @@ class TextTest extends TestUtil
 
         $removeMethod = new \ReflectionMethod(\Com\Tecnick\Pdf\Text::class, 'removeOrdArrSoftHyphens');
         $this->assertSame([65, 66], $removeMethod->invoke($obj, [65, 173, 8203, 66]));
-        $this->assertSame([65, 173], $removeMethod->invoke($obj, [65, 8203, 173]));
+        $this->assertSame([65, 45], $removeMethod->invoke($obj, [65, 8203, 173]));
     }
 
     /** @throws \Throwable */
@@ -3057,7 +3110,7 @@ class TextTest extends TestUtil
     }
 
     /** @throws \Throwable */
-    public function testAddTextCellOffsetsARightAlignedFirstLineFromTheRight(): void
+    public function testAddTextCellOffsetsARightAlignedLtrFirstLineFromTheLeft(): void
     {
         $obj = $this->getTestObject();
         $this->initFont($obj);
@@ -3074,8 +3127,36 @@ class TextTest extends TestUtil
         $obj->addTextCell('Hello world', $pid, $posx, 60.0, $width, 0.0, $offset, 0.0, 'T', 'R');
         $indented = $obj->getLastTextBBox();
 
-        // The line starts from the right, so the offset moves its right edge left.
-        $this->assertEqualsWithDelta($offset, $plain['x'] + $plain['w'] - ($indented['x'] + $indented['w']), 0.001);
+        // An LTR line starts from the left, so the offset shortens it there and
+        // leaves the right edge it is aligned to in place.
+        $this->assertLessThanOrEqual($posx + $width, $plain['x'] + $plain['w']);
+        $this->assertEqualsWithDelta($plain['x'] + $plain['w'], $indented['x'] + $indented['w'], 0.001);
+    }
+
+    /** @throws \Throwable */
+    public function testAddTextCellShortensARightAlignedLtrFirstLineByTheOffset(): void
+    {
+        $obj = $this->getTestObject();
+        $this->initFont($obj);
+        $page = $obj->addPage();
+        $pid = $this->requirePageId($page);
+
+        $posx = 20.0;
+        $width = 100.0;
+        $txt = 'Hello world';
+
+        $obj->addTextCell($txt, $pid, $posx, 40.0, $width, 0.0, 0.0, 0.0, 'T', 'R');
+        $plain = $obj->getLastTextBBox();
+        $this->assertLessThan($width, $plain['w']);
+
+        // An offset leaving less room than the text needs wraps the first line,
+        // while the text stays flush with the right edge.
+        $offset = $width - $plain['w'] + 2.0;
+        $obj->addTextCell($txt, $pid, $posx, 60.0, $width, 0.0, $offset, 0.0, 'T', 'R');
+        $wrapped = $obj->getLastTextBBox();
+
+        $this->assertGreaterThan($plain['h'], $wrapped['h']);
+        $this->assertEqualsWithDelta($plain['x'] + $plain['w'], $wrapped['x'] + $wrapped['w'], 0.001);
     }
 
     /** @throws \Throwable */

@@ -1154,7 +1154,7 @@ class ConformanceMatrixTest extends TestUtil
     }
 
     /**
-     * Build a document whose dates and file ID are pinned.
+     * Build a document whose dates, page timestamp and file ID are pinned.
      *
      * @throws \Throwable
      */
@@ -1167,7 +1167,7 @@ class ConformanceMatrixTest extends TestUtil
         $pdf->setDocModificationDate(1600000000);
         $pdf->setFileId('reproducible-probe');
         $font = $pdf->font->insert($pdf->pon, 'helvetica', '', 12);
-        $pdf->addPage();
+        $pdf->addPage(['time' => 1600000000]);
         $pdf->page->addContent($font['out']);
         $pdf->addHTMLCell(html: '<p>Same bytes every run.</p>', posx: 15, posy: 20, width: 180);
 
