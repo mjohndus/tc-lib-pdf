@@ -32,7 +32,7 @@ Index of the runnable examples bundled with tc-lib-pdf.
 - [E027_annotations.php](E027_annotations.php): Matrix of the supported annotation subtypes.
 - [E028_text_hyphenation.php](E028_text_hyphenation.php): Hyphenation behavior in justified HTML text.
 - [E029_xobject_template.php](E029_xobject_template.php): Reusable Form XObject template example with clipping and transparency.
-- [E030_svg.php](E030_svg.php): SVG rendering showcase using bundled SVG samples.
+- [E030_svg.php](E030_svg.php): SVG rendering showcase using bundled SVG samples, including the regression sheets for paths and text, for the style cascade, opacity, units and clipping, and for stylesheets, group opacity, dashes and the use element.
 - [E031_html_features.php](E031_html_features.php): HTML and CSS parsing and layout feature showcase.
 - [E032_html_lists.php](E032_html_lists.php): Supported HTML list-style and list-item CSS variations.
 - [E033_geometric_transformations.php](E033_geometric_transformations.php): Geometric transforms including scaling, translation, rotation, skewing, mirroring, and reflection.
@@ -54,7 +54,7 @@ Index of the runnable examples bundled with tc-lib-pdf.
 - [E049_output_targets_integration.php](E049_output_targets_integration.php): Multi-target output example covering render, download, save-to-file, and MIME attachment workflows.
 - [E050_shipping_label_barcodes.php](E050_shipping_label_barcodes.php): Shipping label layout using 1D and 2D barcodes with quiet-zone spacing.
 - [E051_viewer_preferences_navigation.php](E051_viewer_preferences_navigation.php): Viewer preferences, display mode, named destinations, internal link annotations, and bookmarks.
-- [E052_custom_fonts_fallback.php](E052_custom_fonts_fallback.php): Custom font selection strategy with Unicode fallback across Latin, DejaVu Sans, and Unifont.
+- [E052_custom_fonts_fallback.php](E052_custom_fonts_fallback.php): Custom font selection strategy with Unicode fallback across Latin, DejaVu Sans, and Unifont, and synthetic bold and italic for a family that ships no such variation.
 - [E053_spot_overprint_proof.php](E053_spot_overprint_proof.php): Spot color tint ramps and overprint simulation using tc-lib-color and tc-lib-pdf-graph.
 - [E054_page_groups_numbering.php](E054_page_groups_numbering.php): Mixed Roman/Arabic page numbering with multi-level bookmarks and auto-generated TOC.
 - [E055_page_reorder_booklet.php](E055_page_reorder_booklet.php): Page reordering via Page::move() with a booklet imposition summary and saddle-stitch spread grid.
