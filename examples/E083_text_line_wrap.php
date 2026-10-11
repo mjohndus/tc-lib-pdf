@@ -79,7 +79,8 @@ $width = 150.0;
 $height = 22.0;
 $step = 27.0;
 
-$word = 'AAAAAAAAAA-BBBBBBBBBB-CCCCCCCCCC';
+// The underscores do not allow a line break, so the test word cannot be broken.
+$word = 'AAAAAAAAAA_BBBBBBBBBB_CCCCCCCCCC';
 $text = 'Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda.';
 
 /**
@@ -271,8 +272,17 @@ $breakable = \str_replace(
 $posy = $drawCase('spaces only', $posy, [
     'txt' => $text . ' ' . $text,
 ]);
-$posy = $drawCase('no break point', $posy, [
+$posy = $drawCase('no break point: broken between two characters at the cell edge', $posy, [
     'txt' => $longword,
+]);
+$pdf->enableWordBreakFallback(false);
+$posy = $drawCase('no break point, enableWordBreakFallback(false): the word overflows', $posy, [
+    'txt' => $longword,
+]);
+$pdf->enableWordBreakFallback(true);
+$posy = $drawCase('combining marks stay with their letter', $posy, [
+    'txt' => \str_repeat("e\u{0301}", 90),
+    'family' => 'dejavusans',
 ]);
 
 // Break after every character to place a hyphenated break next to the cell edge.
@@ -319,6 +329,29 @@ $drawCase('RTL with offset', $posy, [
     'forcedir' => \Com\Tecnick\Unicode\TextDirection::Rtl,
 ]);
 
+$posy = $drawTitle('Break opportunities after hyphens');
+
+$compounds = \str_repeat('long-distance well-known state-of-the-art ', 5);
+$posy = $drawCase('hyphenated compounds: lines may end after a hyphen', $posy, [
+    'txt' => $compounds,
+]);
+$posy = $drawCase('no break in -5, 1-2, ABC-123 or -foo: lines end at spaces only', $posy, [
+    'txt' => \str_repeat('values -5 and 1-2, code ABC-123 and option -foo; ', 4),
+]);
+$posy = $drawCase('non-breaking hyphen (U+2011): kept together', $posy, [
+    'txt' => \str_repeat("long\u{2011}distance well\u{2011}known state\u{2011}of\u{2011}the\u{2011}art ", 5),
+    'family' => 'dejavusans',
+]);
+$pdf->enableHyphenBreaks(false);
+$posy = $drawCase('enableHyphenBreaks(false): lines end at spaces only', $posy, [
+    'txt' => $compounds,
+]);
+$pdf->enableHyphenBreaks(true);
+$posy = $drawCase('narrow cell: a compound wider than the cell breaks after its hyphens', $posy, [
+    'txt' => 'Long-distance well-known state-of-the-art',
+    'width' => 25.0,
+]);
+
 // ----------
 // CSS text-indent: the first line offset of the HTML engine, taken from the side
 // the block starts from. Every case is drawn on a wide and on a narrow block.
@@ -346,6 +379,68 @@ $drawHtmlCase(
     'RTL centered indent',
     $posy,
     '<div dir="rtl" style="text-align:center;text-indent:25mm">' . $rtlbody . '</div>',
+);
+
+// ----------
+// CSS text-indent each-line: the first line after each forced line break is also
+// indented, while the lines wrapped automatically are not. The dashed marks are the
+// indented start (30pt from the block start).
+// ----------
+
+$posy = $drawTitle('CSS text-indent each-line: indented again after each forced line break');
+
+/**
+ * Draws one HTML case with the dashed indent marks on the wide and on the narrow block.
+ */
+$drawIndentCase = function (string $label, float $posy, string $html) use (
+    $pdf,
+    $drawHtmlCase,
+    $markStyle,
+    $posx,
+    $height,
+): float {
+    $next = $drawHtmlCase($label, $posy, $html);
+    $indent = $pdf->toUnit(30.0);
+    foreach ([$posx, $posx + 100.0] as $blockx) {
+        $pdf->page->addContent($pdf->graph->getLine(
+            $blockx + $indent,
+            $posy,
+            $blockx + $indent,
+            $posy + $height,
+            $markStyle,
+        ));
+    }
+
+    return $next;
+};
+
+$lines = 'First line<br>Second line<br>Third line';
+$posy = $drawIndentCase(
+    'each-line (all three lines on the mark)',
+    $posy,
+    '<p style="text-indent:30pt each-line">' . $lines . '</p>',
+);
+$posy = $drawIndentCase(
+    'each-line 30pt (keyword first, same result)',
+    $posy,
+    '<p style="text-indent:each-line 30pt">' . $lines . '</p>',
+);
+$posy = $drawIndentCase('30pt (first line only)', $posy, '<p style="text-indent:30pt">' . $lines . '</p>');
+$posy = $drawIndentCase(
+    'each-line with wrapped lines (only the first line and the line after the break)',
+    $posy,
+    '<p style="text-indent:30pt each-line">' . $ltrbody . '<br>Lambda mu nu xi.</p>',
+);
+$posy = $drawIndentCase(
+    'each-line in pre (every line on the mark)',
+    $posy,
+    "<pre style=\"text-indent:30pt each-line\">First line\nSecond line\nThird line</pre>",
+);
+$posy = $drawIndentCase('30pt foo (invalid, no indent)', $posy, '<p style="text-indent:30pt foo">' . $lines . '</p>');
+$drawIndentCase(
+    '30pt hanging (not supported, no indent)',
+    $posy,
+    '<p style="text-indent:30pt hanging">' . $lines . '</p>',
 );
 
 // ----------

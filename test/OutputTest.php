@@ -19,6 +19,7 @@ namespace Test;
 use Com\Tecnick\Pdf\Sign\Ocsp\Client as OcspClient;
 use Com\Tecnick\Pdf\Sign\Signer;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use Test\Fixture\Authority;
 use Test\Fixture\Der;
 
@@ -2241,6 +2242,7 @@ class OutputTest extends TestUtil
     /**
      * @throws \Throwable
      */
+    #[RequiresPhpExtension('gd')]
     public function testGetOutPDFBodyTagsHtmlImageAsFigureWithAltInPdfuaMode(): void
     {
         $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
@@ -2363,6 +2365,7 @@ class OutputTest extends TestUtil
     /**
      * @throws \Throwable
      */
+    #[RequiresPhpExtension('gd')]
     public function testGetOutPDFBodyTagsHtmlFigureWithFigcaptionInPdfuaMode(): void
     {
         $obj = new TestableOutput('mm', true, false, false, 'pdfua1');
@@ -2483,11 +2486,7 @@ class OutputTest extends TestUtil
             $rows .= '<tr><td>row ' . $idx . '</td><td>value ' . $idx . '</td></tr>';
         }
 
-        $htmlOut = $obj->getHTMLCell('<table border="1">' . $rows . '</table>', 15, 20, 100, 0);
-
-        /** @var \Com\Tecnick\Pdf\Page\Page $page */
-        $page = $this->getObjectProperty($obj, 'page');
-        $page->addContent($htmlOut, $page->getPageId());
+        $obj->addHTMLCell('<table border="1">' . $rows . '</table>', 15, 20, 100, 0);
 
         $out = $obj->exposeGetOutPDFBody();
 

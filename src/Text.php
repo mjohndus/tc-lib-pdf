@@ -21,6 +21,7 @@ namespace Com\Tecnick\Pdf;
 use Com\Tecnick\Pdf\Exception as PdfException;
 use Com\Tecnick\Unicode\Bidi;
 use Com\Tecnick\Unicode\Data\Constant as UnicodeConstant;
+use Com\Tecnick\Unicode\Data\LineBreak;
 use Com\Tecnick\Unicode\Data\Type as UnicodeType;
 use Com\Tecnick\Unicode\Substitution;
 use Com\Tecnick\Unicode\TextDirection;
@@ -131,6 +132,106 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     protected const SYNTHETIC_ITALIC_ANGLE = 11.0;
 
     /**
+     * WORD JOINER code point.
+     */
+    protected const WORD_JOINER = 0x2060;
+
+    /**
+     * Lowest code point with Line_Break class ID (see LineBreak::RANGES).
+     */
+    protected const FIRST_IDEOGRAPHIC_ORD = 0x1B5C;
+
+    /**
+     * Line_Break classes of the ideographic characters, which allow a line break before
+     * and after them.
+     *
+     * @var array<string, bool>
+     */
+    protected const IDEOGRAPHIC_CLASSES = [
+        'ID' => true,
+        'H2' => true,
+        'H3' => true,
+    ];
+
+    /**
+     * Line_Break classes that may not start a line: closing punctuation, exclamation and
+     * interrogation, infix separators, non-starters, small kana, inseparables and quotation marks.
+     *
+     * @var array<string, bool>
+     */
+    protected const NO_LINE_START_CLASSES = [
+        'CL' => true,
+        'CP' => true,
+        'EX' => true,
+        'IS' => true,
+        'NS' => true,
+        'CJ' => true,
+        'IN' => true,
+        'QU' => true,
+    ];
+
+    /**
+     * Line_Break classes that may not end a line: opening punctuation and quotation marks.
+     *
+     * @var array<string, bool>
+     */
+    protected const NO_LINE_END_CLASSES = [
+        'OP' => true,
+        'QU' => true,
+    ];
+
+    /**
+     * Joiners: ZERO WIDTH NON-JOINER and ZERO WIDTH JOINER.
+     *
+     * @var array<int, bool>
+     */
+    protected const JOINER_ORD = [
+        0x200C => true,
+        0x200D => true,
+    ];
+
+    /**
+     * Bidirectional types of the code points next to which no ideographic line break is
+     * added: spaces and separators, which already allow one, and combining marks.
+     *
+     * @var array<string, bool>
+     */
+    protected const NO_IDEOGRAPHIC_BREAK_TYPES = [
+        'WS' => true,
+        'S' => true,
+        'B' => true,
+        'NSM' => true,
+    ];
+
+    /**
+     * Hyphens after which a line may break when they join two letters: HYPHEN-MINUS
+     * (Line_Break HY), ARMENIAN HYPHEN, HYPHEN, FIGURE DASH and EN DASH (Line_Break BA).
+     * NON-BREAKING HYPHEN (U+2011) is not listed: it never allows a break.
+     *
+     * @var array<int, bool>
+     */
+    protected const HYPHEN_BREAK_ORD = [
+        0x002D => true, // HYPHEN-MINUS
+        0x058A => true, // ARMENIAN HYPHEN
+        0x2010 => true, // HYPHEN
+        0x2012 => true, // FIGURE DASH
+        0x2013 => true, // EN DASH
+    ];
+
+    /**
+     * Code points that are never rendered: SOFT HYPHEN (rendered as a hyphen only at the
+     * end of a line), ZERO WIDTH SPACE, WORD JOINER and ZERO WIDTH NO-BREAK SPACE.
+     *
+     * @var array<int, bool>
+     */
+    protected const INVISIBLE_ORD = [
+        0x00AD => true, // SOFT HYPHEN
+        0x200B => true, // ZERO WIDTH SPACE
+        0x2060 => true, // WORD JOINER
+        0xFEFF => true, // ZERO WIDTH NO-BREAK SPACE
+    ];
+
+    /**
      * Code points that never provide a line break opportunity:
      * Unicode Line_Break GL (glue) and WJ (word joiner).
      *
@@ -211,6 +312,24 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     protected bool $autozerowidthbreaks = false;
 
     /**
+     * If true, ZERO-WIDTH-SPACE characters are added to the text at the line break
+     * opportunities around the ideographic characters (UAX #14).
+     */
+    protected bool $ideographicbreaks = true;
+
+    /**
+     * If true, ZERO-WIDTH-SPACE characters are added to the text after the hyphens
+     * that join two letters (UAX #14).
+     */
+    protected bool $hyphenbreaks = true;
+
+    /**
+     * If true, a word wider than the line is broken between two characters instead of
+     * overflowing the line.
+     */
+    protected bool $wordbreakfallback = true;
+
+    /**
      * Synthetic style rendering parameters, indexed by the style to synthesize.
      *
      * @var array<string, array{bold: bool, shear: float}>
@@ -234,6 +353,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * base direction. Set by callers whose offset is a left-to-right cursor position.
      */
     protected bool $textOffsetFromLeft = false;
+
+    /**
+     * Width (internal points) of the content that follows the last line of a centered
+     * or right-aligned text with more than one line, on the same line. outTextLines()
+     * aligns that last line together with it. Set by callers whose text is followed by
+     * other inline content.
+     */
+    protected float $textLastLineTrail = 0.0;
 
     /**
      * Number of lines with glyphs written by outTextLines().
@@ -411,12 +538,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $txt_out = $fontout_prefix . $txt_out;
             }
 
-            $this->cellbbox[] = [
+            $this->cellbbox = $this->getNextBBoxList($this->cellbbox, [
                 'x' => $this->toUnit($cell_pntx),
                 'y' => $this->toYUnit($cell_pnty),
                 'w' => $this->toUnit($cell_pwidth),
                 'h' => $this->toUnit($cell_pheight),
-            ];
+            ]);
 
             if (!$drawcell) {
                 $result = $txt_out;
@@ -769,12 +896,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $txt_pnty = $this->textVPosFromCell($cell_pnty, $cell_pheight, $txt_pheight, $valign, $cell);
                 $line_posy = $this->toYUnit($txt_pnty);
 
-                $this->cellbbox[] = [
+                $this->cellbbox = $this->getNextBBoxList($this->cellbbox, [
                     'x' => $this->toUnit($cell_pntx),
                     'y' => $this->toYUnit($cell_pnty),
                     'w' => $this->toUnit($cell_pwidth),
                     'h' => $this->toUnit($cell_pheight),
-                ];
+                ]);
 
                 $out = $this->outTextLines(
                     $ordarr,
@@ -931,6 +1058,8 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      *                                    a PDF dictionary in the /A entry.
      * @param bool        $required When true, the element is kept in the structure tree even if
      *                              it receives no marked content (e.g. an empty table cell).
+     * @param string|null $lang Optional natural language of the element content, written as
+     *                          /Lang (BCP 47 tag, or '' for an unknown language).
      */
     public function beginStructElem(
         string $role,
@@ -938,6 +1067,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         ?string $alt = null,
         array $attr = [],
         bool $required = false,
+        ?string $lang = null,
     ): void {
         if (!$this->isTaggedMode()) {
             return;
@@ -962,7 +1092,35 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $entry['required'] = true;
         }
 
+        if ($lang !== null) {
+            $entry['lang'] = $lang;
+        }
+
         $this->pdfuaStructStack[] = $entry;
+    }
+
+    /**
+     * Returns the document language (BCP 47 tag), or '' when none is set.
+     */
+    protected function getDocumentLanguage(): string
+    {
+        return '';
+    }
+
+    /**
+     * Returns the language of the content added to the open structure element: the
+     * language of the innermost open element that sets one, or the document language.
+     */
+    protected function getPdfUaLangInEffect(): string
+    {
+        foreach (\array_reverse($this->pdfuaStructStack) as $entry) {
+            $lang = $entry['lang'] ?? null;
+            if ($lang !== null) {
+                return $lang;
+            }
+        }
+
+        return $this->getDocumentLanguage();
     }
 
     /**
@@ -1161,6 +1319,62 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     ): array {
         $fit = $this->normalizeTextCellFitMode($fit);
 
+        // The fit modes detect a word wider than the cell by its width, so the word is
+        // not broken between two characters while a fit mode applies.
+        $wordbreakfallback = $this->wordbreakfallback;
+        if ($fit !== '' && $txt_pwidth > 0 && $inner_pheight > 0) {
+            $this->wordbreakfallback = false;
+        }
+
+        try {
+            return $this->resolveTextCellFitLayout(
+                $fit,
+                $ordarr,
+                $dim,
+                $txt_pwidth,
+                $inner_pheight,
+                $offset_points,
+                $linespace_points,
+                $bidi,
+            );
+        } finally {
+            $this->wordbreakfallback = $wordbreakfallback;
+        }
+    }
+
+    /**
+     * Resolve the fitted text-cell geometry and any temporary font state changes for a
+     * normalized fit mode (see resolveTextCellFitState()).
+     *
+     * @param array<int, int> $ordarr
+     * @param TTextDims $dim
+     * @param TBidiLevels $bidi Bidi levels of $ordarr.
+     *
+     * @return array{
+     *     ordarr: array<int, int>,
+     *     bidi: TBidiLevels,
+     *     dim: TTextDims,
+     *     lines: array<int, TextLinePos>,
+     *     txtheight: float,
+     *     line_width_points: float,
+     *     fontout_prefix: string,
+     *     restore_font: bool,
+     *     restore_font_output: bool,
+     *     fontout_restore: string
+     * }
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function resolveTextCellFitLayout(
+        string $fit,
+        array $ordarr,
+        array $dim,
+        float $txt_pwidth,
+        float $inner_pheight,
+        float $offset_points,
+        float $linespace_points,
+        array $bidi = self::BIDI_NONE,
+    ): array {
         $base_layout = $this->getTextCellLayout(
             $ordarr,
             $dim,
@@ -2233,10 +2447,25 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
             $cell_width = $width - $offset;
             $line_halign = $i === 0 ? $firstlinehalign : $halign;
+            if (
+                $line_halign === 'J'
+                && ($this->rtl || $baseRtl)
+                && ($data['septype'] === 'B' || $i === $lastline && $jlast)
+            ) {
+                // A line that is not justified starts at the right side of a
+                // right-to-left paragraph.
+                $line_halign = 'R';
+            }
+
+            $align_pwidth = $line_dim['totwidth'];
+            if ($i === $lastline && $i > 0 && ($line_halign === 'C' || $line_halign === 'R')) {
+                $align_pwidth += $this->textLastLineTrail;
+            }
+
             $txt_posx = $this->toUnit($this->textHPosFromCell(
                 $this->toPoints($line_posx),
                 $this->toPoints($cell_width),
-                $line_dim['totwidth'],
+                $align_pwidth,
                 $line_halign,
                 static::ZEROCELL,
             ));
@@ -2346,12 +2575,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $line_posy = $bbox['y'] + $bbox['h'] + $fontascent + $linespace;
         }
 
-        $this->textbbox[] = [
+        $this->textbbox = $this->getNextBBoxList($this->textbbox, [
             'x' => $minx,
             'y' => $miny,
             'w' => $maxx - $minx,
             'h' => $maxy - $miny,
-        ];
+        ]);
 
         return $out;
     }
@@ -2412,6 +2641,16 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         $bidi = self::BIDI_NONE;
         $this->prepareText($txt, $ordarr, $dim, $forcedir, $baseRtl, $bidi);
         $ordarr = $this->reorderOrdArr($ordarr, $bidi);
+        // A single line has no line break: the break controls are not rendered.
+        $visible = \array_values(\array_filter(
+            $ordarr,
+            static fn(int $ord): bool => !isset(self::INVISIBLE_ORD[$ord]),
+        ));
+        if (\count($visible) !== \count($ordarr)) {
+            $ordarr = $visible;
+            $dim = $this->font->getOrdArrDims($ordarr);
+        }
+
         // $posx is in user units while the measured width is in points.
         $totWidth = $this->toUnit($dim['totwidth']);
 
@@ -2640,7 +2879,8 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         if ($this->isunicode && !$this->font->isCurrentByteFont()) {
             $baseRtl = $this->isOrdArrBaseRtl($ordarr, $forcedir);
-            $bidiobj = new Bidi($txt, null, $ordarr, $forcedir);
+            // the line break controls stay in the text, for the line breaking
+            $bidiobj = new Bidi($txt, null, $ordarr, $forcedir, true, true);
             /** @var array<int, int> $ordarr */
             $ordarr = \array_values($bidiobj->getLogicalOrdArray());
             $bidi = $this->getTextBidiLevels($bidiobj);
@@ -2665,6 +2905,14 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         if ($this->autozerowidthbreaks) {
             [$ordarr, $bidi] = $this->mapOrdArrByLevelRun($ordarr, $bidi, $this->addOrdArrBreakPoints(...));
+        }
+
+        if ($this->ideographicbreaks) {
+            [$ordarr, $bidi] = $this->mapOrdArrByLevelRun($ordarr, $bidi, $this->addOrdArrIdeographicBreaks(...));
+        }
+
+        if ($this->hyphenbreaks) {
+            [$ordarr, $bidi] = $this->mapOrdArrByLevelRun($ordarr, $bidi, $this->addOrdArrHyphenBreaks(...));
         }
 
         $dim = $this->font->getOrdArrDims($ordarr);
@@ -2786,7 +3034,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      * Returns the code points of a line in visual order, ready to be rendered.
      *
      * A SOFT HYPHEN at the logical end of the line is rendered as a HYPHEN; the
-     * other SOFT HYPHEN and ZERO WIDTH SPACE code points are removed.
+     * other INVISIBLE_ORD code points are removed.
      *
      * @param array<int, int> $ordarr Code points of the paragraph in logical order.
      * @param TBidiLevels     $bidi   Bidi levels of $ordarr.
@@ -2807,13 +3055,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
 
         $line = $this->reorderOrdArr($line, $this->sliceBidiLevels($bidi, $pos, $chars));
 
-        return \array_values(\array_filter(
-            $line,
-            static fn(int $ord): bool => (
-                $ord !== UnicodeConstant::SOFT_HYPHEN
-                && $ord !== UnicodeConstant::ZERO_WIDTH_SPACE
-            ),
-        ));
+        return \array_values(\array_filter($line, static fn(int $ord): bool => !isset(self::INVISIBLE_ORD[$ord])));
     }
 
     /**
@@ -3023,6 +3265,33 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
                 $overline = false;
             }
 
+            if ($overline && $prevdata === null && $this->wordbreakfallback) {
+                // No word to leave behind and the word does not fit a line: break it
+                // between two characters, at the widest prefix that fits each line.
+                $segend = (int) $data['pos'];
+                $sepextra = $data['ord'] === UnicodeConstant::SOFT_HYPHEN ? $soft_hyphen_width : 0.0;
+                $restwidth = $curwidth;
+                while ($restwidth > ($line_width + self::LINE_FIT_EPSILON) && $posstart < $segend) {
+                    $piece = $this->getOrdArrFittingPrefix($ordarr, $posstart, $segend, $line_width);
+                    $lines[] = [
+                        'pos' => $posstart,
+                        'chars' => $piece['chars'],
+                        'spaces' => 0,
+                        'septype' => 'BN',
+                        'totwidth' => $piece['width'],
+                        'totspacewidth' => 0.0,
+                        'words' => 0,
+                    ];
+                    $posstart += $piece['chars'];
+                    $line_width = $pwidth;
+                    $restwidth = $this->getOrdArrSliceWidth($ordarr, $posstart, $segend) + $sepextra;
+                }
+
+                $prev_totwidth = $dataTotWidth - ($restwidth - $sepextra);
+                $curwidth = $restwidth;
+                $overline = $curwidth > ($line_width + self::LINE_FIT_EPSILON);
+            }
+
             if ($data['septype'] === 'B' || $overline) {
                 // the current word is a line break or does not fit in the current line
                 if ($overline && $prevdata !== null) {
@@ -3096,6 +3365,104 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     }
 
     /**
+     * Returns the width (internal points) of the code points from $start to $end
+     * (excluded) in the current font.
+     *
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function getOrdArrSliceWidth(array $ordarr, int $start, int $end): float
+    {
+        if ($end <= $start) {
+            return 0.0;
+        }
+
+        return $this->font->getOrdArrDims(\array_slice($ordarr, $start, $end - $start))['totwidth'];
+    }
+
+    /**
+     * Returns the number of code points and the width (internal points) of the longest
+     * part of the word from $start to $end (excluded) that fits $width and ends where
+     * isCharBreakAllowed() allows it. At least one character is taken, and at least one
+     * is left after it when the word has more than one.
+     *
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array{chars: int, width: float}
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function getOrdArrFittingPrefix(array $ordarr, int $start, int $end, float $width): array
+    {
+        $breaks = [];
+        $last = ($end - $start) > 1 ? $end - 1 : $end;
+        for ($pos = $start + 1; $pos <= $last; ++$pos) {
+            if ($pos !== $end && !$this->isCharBreakAllowed($ordarr[$pos - 1] ?? -1, $ordarr[$pos] ?? -1)) {
+                continue;
+            }
+
+            $breaks[] = $pos;
+        }
+
+        if ($breaks === []) {
+            return ['chars' => $end - $start, 'width' => $this->getOrdArrSliceWidth($ordarr, $start, $end)];
+        }
+
+        // The widths grow with the position: find the last break that fits.
+        $low = 0;
+        $high = \count($breaks) - 1;
+        $best = -1;
+        while ($low <= $high) {
+            $mid = \intdiv($low + $high, 2);
+            $pos = $breaks[$mid] ?? $end;
+            if ($this->getOrdArrSliceWidth($ordarr, $start, $pos) <= ($width + self::LINE_FIT_EPSILON)) {
+                $best = $mid;
+                $low = $mid + 1;
+                continue;
+            }
+
+            $high = $mid - 1;
+        }
+
+        $pos = $breaks[\max(0, $best)] ?? $end;
+
+        return ['chars' => $pos - $start, 'width' => $this->getOrdArrSliceWidth($ordarr, $start, $pos)];
+    }
+
+    /**
+     * Returns true when a word may be broken between the two code points without
+     * splitting a character: the second is not a combining mark, a joiner or an emoji
+     * modifier, and neither is a joiner or a no-break code point (word joiner, no-break
+     * spaces).
+     */
+    protected function isCharBreakAllowed(int $prev, int $ord): bool
+    {
+        foreach ([$prev, $ord] as $code) {
+            if (isset(self::JOINER_ORD[$code]) || isset(self::NO_BREAK_ORD[$code])) {
+                return false;
+            }
+        }
+
+        if ($ord >= 0x1_F3FB && $ord <= 0x1_F3FF) {
+            return false;
+        }
+
+        return !$this->isCombiningMarkOrd($ord);
+    }
+
+    /**
+     * Enable or disable the breaking of a word wider than the line between two
+     * characters. When disabled, such a word overflows the line. Enabled by default.
+     *
+     * @param bool $enabled
+     */
+    public function enableWordBreakFallback(bool $enabled): void
+    {
+        $this->wordbreakfallback = $enabled;
+    }
+
+    /**
      * Returns the PDF code to render a line of text.
      *
      * @param string          $txt         Clean text string to be processed.
@@ -3164,12 +3531,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
             $strokewidth = \max($strokewidth, $this->toUnit($curfont['size'] / self::SYNTHETIC_BOLD_DIVISOR));
         }
 
-        $this->bbox[] = [
+        $this->bbox = $this->getNextBBoxList($this->bbox, [
             'x' => $posx,
             'y' => $posy - $this->toUnit($curfont['ascent']),
             'w' => $width,
             'h' => $this->toUnit($curfont['height']),
-        ];
+        ]);
 
         $out = $this->getJustifiedString($txt, $ordarr, $dim, $width);
 
@@ -3259,15 +3626,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      */
     public function getLastBBox(): array
     {
-        if ($this->bbox === []) {
+        $idx = \array_key_last($this->bbox);
+        if ($idx === null) {
             return self::BBOX_DEFAULT;
         }
-        $idx = \count($this->bbox) - 1;
-        $item = $this->bbox[$idx] ?? null;
-        if ($item !== null) {
-            return $item;
-        }
-        return self::BBOX_DEFAULT;
+
+        return $this->bbox[$idx] ?? self::BBOX_DEFAULT;
     }
 
     /**
@@ -3277,15 +3641,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      */
     public function getLastTextBBox(): array
     {
-        if ($this->textbbox === []) {
+        $idx = \array_key_last($this->textbbox);
+        if ($idx === null) {
             return self::BBOX_DEFAULT;
         }
-        $idx = \count($this->textbbox) - 1;
-        $item = $this->textbbox[$idx] ?? null;
-        if ($item !== null) {
-            return $item;
-        }
-        return self::BBOX_DEFAULT;
+
+        return $this->textbbox[$idx] ?? self::BBOX_DEFAULT;
     }
 
     /**
@@ -3295,15 +3656,12 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
      */
     public function getLastCellBBox(): array
     {
-        if ($this->cellbbox === []) {
+        $idx = \array_key_last($this->cellbbox);
+        if ($idx === null) {
             return self::BBOX_DEFAULT;
         }
-        $idx = \count($this->cellbbox) - 1;
-        $item = $this->cellbbox[$idx] ?? null;
-        if ($item !== null) {
-            return $item;
-        }
-        return self::BBOX_DEFAULT;
+
+        return $this->cellbbox[$idx] ?? self::BBOX_DEFAULT;
     }
 
     /**
@@ -3336,8 +3694,8 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     {
         $pwidth = $this->toPoints($width);
 
-        $this->bbox[] = $this->getLastBBox();
-        $bboxid = \array_key_last($this->bbox);
+        $this->bbox = $this->getNextBBoxList($this->bbox, $this->getLastBBox());
+        $bboxid = (int) \array_key_last($this->bbox);
 
         if (!$this->isunicode || $this->font->isCurrentByteFont()) {
             if ($this->isunicode) {
@@ -3806,7 +4164,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     }
 
     /**
-     * Converts a trailing SHY to a visible HYPHEN and removes the other SHY and ZWSP.
+     * Converts a trailing SHY to a visible HYPHEN and removes the other INVISIBLE_ORD code points.
      *
      * @param array<int, int> $ordarr The array of Unicode code points.
      *
@@ -3819,10 +4177,7 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
         if ($lastidx !== null && isset($ordarr[$lastidx])) {
             $keeplast = $ordarr[$lastidx] === UnicodeConstant::SOFT_HYPHEN;
         }
-        $retarr = \array_values(\array_filter(
-            $ordarr,
-            static fn($ord) => $ord !== UnicodeConstant::SOFT_HYPHEN && $ord !== UnicodeConstant::ZERO_WIDTH_SPACE,
-        ));
+        $retarr = \array_values(\array_filter($ordarr, static fn($ord) => !isset(self::INVISIBLE_ORD[$ord])));
         if ($keeplast) {
             $retarr[] = UnicodeConstant::HYPHEN;
         }
@@ -3874,6 +4229,226 @@ abstract class Text extends \Com\Tecnick\Pdf\Cell
     public function enableZeroWidthBreakPoints(bool $enabled): void
     {
         $this->autozerowidthbreaks = $enabled;
+    }
+
+    /**
+     * Enable or disable the line break opportunities around the ideographic characters
+     * (Chinese, Japanese and Korean text without spaces). Enabled by default.
+     *
+     * @param bool $enabled
+     */
+    public function enableIdeographicBreaks(bool $enabled): void
+    {
+        $this->ideographicbreaks = $enabled;
+    }
+
+    /**
+     * Enable or disable the line break opportunities after the hyphens that join two
+     * letters (for example "well-|known"). Enabled by default.
+     *
+     * @param bool $enabled
+     */
+    public function enableHyphenBreaks(bool $enabled): void
+    {
+        $this->hyphenbreaks = $enabled;
+    }
+
+    /**
+     * Add a ZERO-WIDTH-SPACE (U+200B) after each hyphen that joins two letters
+     * (see isHyphenBreak()).
+     *
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int>
+     */
+    protected function addOrdArrHyphenBreaks(array $ordarr): array
+    {
+        $ordarr = \array_values($ordarr);
+        $out = [];
+        foreach ($ordarr as $idx => $ord) {
+            $out[] = $ord;
+            if (isset(self::HYPHEN_BREAK_ORD[$ord]) && $this->isHyphenBreak($ordarr, $idx)) {
+                $out[] = UnicodeConstant::ZERO_WIDTH_SPACE;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Returns true when a line may break after the hyphen at the given position: the
+     * code point before it is a letter (through combining marks) and the one after it
+     * is a letter. There is no break after a word-initial hyphen, between digits, before
+     * a digit, or at the end of the text (UAX #14 rules LB20.1, LB21 and LB25).
+     *
+     * @param list<int> $ordarr Array of UTF-8 codepoints (integer values).
+     * @param int       $idx    Position of the hyphen.
+     */
+    protected function isHyphenBreak(array $ordarr, int $idx): bool
+    {
+        if (!$this->isLetterOrd($ordarr[$idx + 1] ?? -1)) {
+            return false;
+        }
+
+        for ($pos = $idx - 1; $pos >= 0; --$pos) {
+            $prev = $ordarr[$pos] ?? -1;
+            if (!$this->isCombiningMarkOrd($prev)) {
+                return $this->isLetterOrd($prev);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns true when the code point is a letter (Unicode General Category L).
+     */
+    protected function isLetterOrd(int $ord): bool
+    {
+        $chr = $ord >= 0 ? \mb_chr($ord, 'UTF-8') : false;
+
+        return \is_string($chr) && \preg_match('/^\p{L}$/u', $chr) === 1;
+    }
+
+    /**
+     * Returns true when the code point is a combining mark (Unicode General Category M).
+     */
+    protected function isCombiningMarkOrd(int $ord): bool
+    {
+        $chr = $ord >= 0 ? \mb_chr($ord, 'UTF-8') : false;
+
+        return \is_string($chr) && \preg_match('/^\p{M}$/u', $chr) === 1;
+    }
+
+    /**
+     * Returns the position of the first automatic line break opportunity of the code
+     * points (the index of the code point a new line would start with): an ideographic
+     * break or a break after a hyphen joining two letters, or -1 when there is none.
+     *
+     * @param array<array-key, int> $ordarr Array of UTF-8 codepoints (integer values).
+     */
+    protected function getOrdArrFirstAutoBreak(array $ordarr): int
+    {
+        $ordarr = \array_values($ordarr);
+        $first = $this->getOrdArrFirstIdeographicBreak($ordarr);
+        if (!$this->hyphenbreaks) {
+            return $first;
+        }
+
+        $limit = $first > 0 ? $first : \count($ordarr);
+        for ($idx = 0; $idx < $limit; ++$idx) {
+            if (isset(self::HYPHEN_BREAK_ORD[$ordarr[$idx] ?? -1]) && $this->isHyphenBreak($ordarr, $idx)) {
+                return $idx + 1;
+            }
+        }
+
+        return $first;
+    }
+
+    /**
+     * Add a ZERO-WIDTH-SPACE (U+200B) at each line break opportunity around the
+     * ideographic characters (see isIdeographicBreak()).
+     *
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int>
+     */
+    protected function addOrdArrIdeographicBreaks(array $ordarr): array
+    {
+        if ($ordarr === [] || \max($ordarr) < self::FIRST_IDEOGRAPHIC_ORD) {
+            return $ordarr;
+        }
+
+        $out = [];
+        $prev = -1;
+        $prevclass = '';
+        foreach ($ordarr as $ord) {
+            if ($prev >= 0 && UnicodeType::getType($ord) === 'NSM') {
+                // a combining mark belongs to the character before it
+                $out[] = $ord;
+                continue;
+            }
+
+            $class = LineBreak::getClass($ord);
+            if ($prev >= 0 && $this->isIdeographicBreak($prev, $prevclass, $ord, $class)) {
+                $out[] = UnicodeConstant::ZERO_WIDTH_SPACE;
+            }
+
+            $out[] = $ord;
+            $prev = $ord;
+            $prevclass = $class;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Returns the position of the first ideographic line break opportunity of the code
+     * points (the index of the code point a new line would start with), or -1 when there is
+     * none or the ideographic line breaks are disabled.
+     *
+     * @param array<array-key, int> $ordarr Array of UTF-8 codepoints (integer values).
+     */
+    protected function getOrdArrFirstIdeographicBreak(array $ordarr): int
+    {
+        $ordarr = \array_values($ordarr);
+        if (!$this->ideographicbreaks || $ordarr === [] || \max($ordarr) < self::FIRST_IDEOGRAPHIC_ORD) {
+            return -1;
+        }
+
+        $prev = -1;
+        $prevclass = '';
+        foreach ($ordarr as $idx => $ord) {
+            if ($prev >= 0 && UnicodeType::getType($ord) === 'NSM') {
+                continue;
+            }
+
+            $class = LineBreak::getClass($ord);
+            if ($prev >= 0 && $this->isIdeographicBreak($prev, $prevclass, $ord, $class)) {
+                return $idx;
+            }
+
+            $prev = $ord;
+            $prevclass = $class;
+        }
+
+        return -1;
+    }
+
+    /**
+     * Returns true when a line may break between two adjacent code points because one of
+     * them is ideographic (Line_Break ID, H2 or H3), unless the second may not start a
+     * line, the first may not end one, or either one is a space, a line break control,
+     * a joiner or a combining mark. A combining mark is compared through the character
+     * it belongs to.
+     *
+     * @param int    $prev      First code point.
+     * @param string $prevclass Line_Break class of the first code point (see LineBreak::getClass()).
+     * @param int    $ord       Second code point.
+     * @param string $class     Line_Break class of the second code point.
+     */
+    protected function isIdeographicBreak(int $prev, string $prevclass, int $ord, string $class): bool
+    {
+        if (!isset(self::IDEOGRAPHIC_CLASSES[$prevclass]) && !isset(self::IDEOGRAPHIC_CLASSES[$class])) {
+            return false;
+        }
+
+        if (isset(self::NO_LINE_START_CLASSES[$class]) || isset(self::NO_LINE_END_CLASSES[$prevclass])) {
+            return false;
+        }
+
+        foreach ([$prev, $ord] as $code) {
+            if (
+                isset(self::INVISIBLE_ORD[$code])
+                || isset(self::NO_BREAK_ORD[$code])
+                || isset(self::JOINER_ORD[$code])
+                || isset(self::NO_IDEOGRAPHIC_BREAK_TYPES[UnicodeType::getType($code)])
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

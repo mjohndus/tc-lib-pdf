@@ -33,7 +33,7 @@ jobs:
       #- name: Install pdfinfo
       #  run: sudo apt-get install -y poppler-utils
       - name: Use php ${{ matrix.php-version }}
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php-version }}
           coverage: pcov
@@ -49,9 +49,9 @@ jobs:
       - name: Cache module
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.composer/cache/
-          key: composer-${{ matrix.os }}-${{ matrix.php-version }}-${{ hashFiles('composer.json') }}
-          restore-keys: composer-${{ matrix.os }}-${{ matrix.php-version }}-
+          path: ~/.cache/composer/
+          key: composer-${{ runner.os }}-${{ matrix.php-version }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-${{ matrix.php-version }}-
       - name: Install dependencies
         env:
           GH_TOKEN: ${{ github.token }}
@@ -120,22 +120,21 @@ jobs:
       #      --run-id=${{ github.run_id }}
       #    cat target/report/renderability-score.md >> "$GITHUB_STEP_SUMMARY"
       #    cat target/report/renderability-trend.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload CSS renderability reports
-        if: matrix.php-version == '8.4'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: css-renderability-reports-${{ github.run_id }}
-          path: |
-            target/report/renderability-score.json
-            target/report/renderability-score.md
-            target/report/renderability-trend.json
-            target/report/renderability-trend.md
+      #- name: Upload CSS renderability reports
+      #  if: matrix.php-version == '8.4'
+      #  uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      #  with:
+      #    name: css-renderability-reports-${{ github.run_id }}
+      #    path: |
+      #      target/report/renderability-score.json
+      #      target/report/renderability-score.md
+      #      target/report/renderability-trend.json
+      #      target/report/renderability-trend.md
       # make install, resources/autoload.php and the packaging descriptors are
       # what reaches RPM/DEB users; nothing else in CI touches them. Install into
       # a throwaway prefix and load the library through the shipped autoloader,
       # which only resolves in the installed layout.
       - name: Packaging smoke test
-        if: matrix.os == 'ubuntu-latest'
         run: |
           DESTDIR="$(mktemp -d)"
           make install DESTDIR="$DESTDIR"
@@ -171,12 +170,13 @@ jobs:
   test-lowest:
     name: Test lowest supported dependencies on php 8.2
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Use php 8.2
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: "8.2"
           coverage: none
@@ -188,7 +188,7 @@ jobs:
       - name: Cache module
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.composer/cache/
+          path: ~/.cache/composer/
           key: composer-lowest-${{ hashFiles('composer.json') }}
           restore-keys: composer-lowest-
       # composer.lock is not committed, so the default install always resolves
@@ -200,6 +200,44 @@ jobs:
       - name: Run unit tests
         run: composer run test
 
+  test-no-gd:
+    name: Test without the gd extension on php 8.4
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Use php 8.4 without gd
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.4"
+          coverage: none
+          extensions: ctype, curl, filter, hash, intl, json, mbstring, openssl, pcre, tidy, xml, zlib, :gd, :imagick
+          ini-values: display_errors=on, error_reporting=-1, zend.assertions=1
+      - name: Check that gd is not loaded
+        run: |
+          php -r 'exit(extension_loaded("gd") ? 1 : 0);'
+      # The runtime dependencies must resolve on a platform without gd.
+      - name: Resolve the runtime dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          php -r '$c = json_decode(file_get_contents("composer.json"), true); unset($c["require-dev"]); file_put_contents("composer.runtime.json", json_encode($c));'
+          COMPOSER=composer.runtime.json composer update --no-interaction --dry-run
+      # The development dependencies list gd for the image tests, which skip without it.
+      - name: Install dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: composer update --no-interaction --ignore-platform-req=ext-gd
+      - name: Run unit tests
+        run: composer run test
+      - name: Render text-only examples
+        run: |
+          php examples/E006_minimal.php > /dev/null
+          php examples/E088_font_subset_modes.php > /dev/null
+          php examples/E089_import_empty_resources.php > /dev/null
+
   test-windows:
     name: Test on php 8.5 and windows-latest
     runs-on: windows-latest
@@ -209,7 +247,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Use php 8.5
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: "8.5"
           coverage: none
@@ -232,7 +270,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Use php 8.5
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: "8.5"
           coverage: none

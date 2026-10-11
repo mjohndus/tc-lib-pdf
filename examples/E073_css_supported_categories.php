@@ -47,7 +47,15 @@ $pdf->setPDFFilename('073_css_supported_categories.pdf');
 $pdf->font->insert($pdf->pon, 'courier', '', 11);
 
 $bfont = $pdf->font->insert($pdf->pon, 'helvetica', '', 11);
-$pdf->addPage();
+// The HTML continues from the top margin on the pages added by page breaks.
+$pdf->addPage([
+    'margin' => [
+        'PT' => 15,
+        'PB' => 15,
+        'CT' => 15,
+        'CB' => 15,
+    ],
+]);
 $pdf->page->addContent($bfont['out']);
 
 $html = <<<HTML
@@ -1039,6 +1047,27 @@ $html = <<<HTML
     <code>p:nth-of-type(2)</code>, dimmed non-hit item via <code>:not(.sel-hit)</code>, and red+bold first
     child in the compound selector block should all be visible.
     </p>
+
+    <strong style="font-size:8pt;">Rules that also match an ancestor</strong>
+    <style>
+    .sel-anc td > * { font-size: 7pt; }
+    .sel-anc .anc-large { font-size: 12pt; }
+    .sel-anc .anc-big { font-size: 120%; }
+    .sel-anc .anc-box { margin-left: 5mm; border-left: 1pt solid #2f5a8a; padding-left: 2pt; }
+    </style>
+    <div class="sel-anc">
+      <table border="1" cellpadding="2" style="width:100%;">
+        <tr><td class="anc-large"><div class="anc-large">Child of a matching cell (12pt expected, not 7pt)</div></td></tr>
+      </table>
+      <p class="anc-large" style="margin:1pt 0;">Reference paragraph (12pt)</p>
+      <div style="font-size:8pt;"><span class="anc-big">8pt x 1.2 = 9.6pt <span class="anc-big">x 1.2 = 11.52pt
+      <span class="anc-big">x 1.2 = 13.82pt</span></span></span></div>
+      <div class="anc-box">Box level 1
+        <div class="anc-box">Box level 2 (indented again expected)
+          <div class="anc-box">Box level 3 (indented again expected)</div>
+        </div>
+      </div>
+    </div>
 
     <div class="page-break"></div>
     <h2>23) User Interface & Typography Properties</h2>
