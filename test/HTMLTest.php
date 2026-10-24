@@ -8914,6 +8914,51 @@ class HTMLTest extends TestUtil
     }
 
     /**
+     * Base64 1x1 PNG whose bytes contain the '|' marker field separator.
+     */
+    private const PNG_WITH_FIELD_SEPARATOR = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAADElEQVQImWNgYAgCAABWAFO8xnxsAAAAAElFTkSuQmCC';
+
+    /**
+     * @throws \Throwable
+     */
+    public function testListStyleImageRasterDataUriResolvesToDataMarker(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $png = (string) \base64_decode(self::PNG_WITH_FIELD_SEPARATOR, true);
+        $this->assertStringContainsString('|', $png);
+        $marker = $obj->exposeGetHTMLListImageMarkerType(
+            'url(data:image/png;base64,' . self::PNG_WITH_FIELD_SEPARATOR . ')',
+        );
+
+        $this->assertStringStartsWith('img|png|', $marker);
+        $this->assertStringEndsWith('|@' . $png, $marker);
+    }
+
+    /**
+     * @throws \Throwable
+     */
+    #[RequiresPhpExtension('gd')]
+    public function testListStyleImageRasterDataUriRendersImage(): void
+    {
+        $obj = $this->getInternalTestObject();
+        $this->initFontAndPage($obj);
+
+        $out = $obj->getHTMLCell(
+            '<ul style="list-style-image:url(data:image/png;base64,'
+            . self::PNG_WITH_FIELD_SEPARATOR
+            . ')"><li>Item</li></ul>',
+            10,
+            10,
+            100,
+            0,
+        );
+
+        $this->assertMatchesRegularExpression('/\/IMG(?:plain|mask)?\d+ Do Q/', $out);
+    }
+
+    /**
      * @throws \Throwable
      */
     public function testParseHTMLStyleAttributesPreservesDataUriValues(): void
@@ -10948,11 +10993,14 @@ class HTMLTest extends TestUtil
         /** @var \Com\Tecnick\Pdf\Page\Page $page */
         $page = $this->getObjectProperty($obj, 'page');
         $region = $page->getRegion();
-        $starty = \max(0.0, $region['RH'] - 5.0);
+        // The head and the first body row fit the first page, the second body row
+        // moves to the next page under the replayed head.
+        $starty = \max(0.0, $region['RH'] - 20.0);
 
         $out = $this->addHTMLCellContent(
             $obj,
-            '<table cellpadding="6"><thead><tr><th>HDR</th></tr></thead><tr><td>BODY</td></tr></table>',
+            '<table cellpadding="6"><thead><tr><th>HDR</th></tr></thead><tr><td>FIRST</td></tr>'
+            . '<tr><td>BODY</td></tr></table>',
             0,
             $starty,
             30,
